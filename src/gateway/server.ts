@@ -153,7 +153,6 @@ import {
   type ResolvedGatewayAuth,
 } from "./auth.js";
 import { buildMessageWithAttachments } from "./chat-attachments.js";
-import { handleControlUiHttpRequest } from "./control-ui.js";
 import {
   applyHookMappings,
   type HookMappingResolved,
@@ -558,11 +557,6 @@ export type GatewayServerOptions = {
    * Prefer `bind` unless you really need a specific address.
    */
   host?: string;
-  /**
-   * If false, do not serve the browser Control UI under /ui/.
-   * Default: config `gateway.controlUi.enabled` (or true when absent).
-   */
-  controlUiEnabled?: boolean;
   /**
    * Override gateway auth configuration (merges with config).
    */
@@ -1331,8 +1325,6 @@ export async function startGatewayServer(
       "gateway bind is tailnet, but no tailnet interface was found; refusing to start gateway",
     );
   }
-  const controlUiEnabled =
-    opts.controlUiEnabled ?? cfgAtStart.gateway?.controlUi?.enabled ?? true;
   const authBase = cfgAtStart.gateway?.auth ?? {};
   const authOverrides = opts.auth ?? {};
   const authConfig = {
@@ -1700,9 +1692,7 @@ export async function startGatewayServer(
 
     void (async () => {
       if (await handleHooksRequest(req, res)) return;
-      if (controlUiEnabled) {
-        if (handleControlUiHttpRequest(req, res)) return;
-      }
+
 
       res.statusCode = 404;
       res.setHeader("Content-Type", "text/plain; charset=utf-8");

@@ -78,3 +78,14 @@ Chạy trên Linux server (Ubuntu), loại bỏ tất cả chức năng không c
 **Các file liên quan đã được clean:** `gateway/server.ts`, `infra/heartbeat-runner.ts`, `cli/deps.ts`, `config/config.ts`, `config/sessions.ts`, `cron/types.ts`, `cron/isolated-agent.ts`, `commands/agent.ts`, `commands/send.ts`, `gateway/hooks-mapping.ts`
 
 Build status: ✅ clean sau khi xóa
+
+### Đã xóa — Web UI
+
+| Module | Lý do |
+|--------|-------|
+| `ui/` | WebChat frontend (Vite app) — dùng Telegram/Lark thay thế |
+| `src/gateway/control-ui.ts` | HTTP handler serve WebChat assets |
+
+**Scripts đã xóa khỏi package.json:** `ui:install`, `ui:dev`, `ui:build`
+
+Build status: ✅ clean sau khi xóa
