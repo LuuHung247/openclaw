@@ -425,7 +425,6 @@ export async function agentCommand(
   const whatsappTarget = opts.to ? normalizeE164(opts.to) : allowFrom[0];
   const telegramTarget = opts.to?.trim() || undefined;
   const discordTarget = opts.to?.trim() || undefined;
-  const signalTarget = opts.to?.trim() || undefined;
 
   const logDeliveryError = (err: unknown) => {
     const deliveryTarget =
@@ -435,9 +434,7 @@ export async function agentCommand(
           ? whatsappTarget
           : deliveryProvider === "discord"
             ? discordTarget
-            : deliveryProvider === "signal"
-              ? signalTarget
-              : undefined;
+            : undefined;
     const message = `Delivery failed (${deliveryProvider}${deliveryTarget ? ` to ${deliveryTarget}` : ""}): ${String(err)}`;
     runtime.error?.(message);
     if (!runtime.error) runtime.log(message);
@@ -463,13 +460,6 @@ export async function agentCommand(
       if (!bestEffortDeliver) throw err;
       logDeliveryError(err);
     }
-    if (deliveryProvider === "signal" && !signalTarget) {
-      const err = new Error(
-        "Delivering to Signal requires --to <E.164|group:ID|signal:group:ID|signal:+E.164>",
-      );
-      if (!bestEffortDeliver) throw err;
-      logDeliveryError(err);
-    }
     if (deliveryProvider === "webchat") {
       const err = new Error(
         "Delivering to WebChat is not supported via `clawdis agent`; use WhatsApp/Telegram or run with --deliver=false.",
@@ -481,7 +471,6 @@ export async function agentCommand(
       deliveryProvider !== "whatsapp" &&
       deliveryProvider !== "telegram" &&
       deliveryProvider !== "discord" &&
-      deliveryProvider !== "signal" &&
       deliveryProvider !== "webchat"
     ) {
       const err = new Error(`Unknown provider: ${deliveryProvider}`);
@@ -514,8 +503,7 @@ export async function agentCommand(
   const deliveryTextLimit =
     deliveryProvider === "whatsapp" ||
     deliveryProvider === "telegram" ||
-    deliveryProvider === "discord" ||
-    deliveryProvider === "signal"
+    deliveryProvider === "discord"
       ? resolveTextChunkLimit(cfg, deliveryProvider)
       : resolveTextChunkLimit(cfg, "whatsapp");
 
@@ -597,37 +585,6 @@ export async function agentCommand(
             await deps.sendMessageDiscord(discordTarget, caption, {
               token: process.env.DISCORD_BOT_TOKEN,
               mediaUrl: url,
-            });
-          }
-        }
-      } catch (err) {
-        if (!bestEffortDeliver) throw err;
-        logDeliveryError(err);
-      }
-    }
-
-    if (deliveryProvider === "signal" && signalTarget) {
-      try {
-        if (media.length === 0) {
-          await deps.sendMessageSignal(signalTarget, text, {
-            maxBytes: cfg.signal?.mediaMaxMb
-              ? cfg.signal.mediaMaxMb * 1024 * 1024
-              : cfg.agent?.mediaMaxMb
-                ? cfg.agent.mediaMaxMb * 1024 * 1024
-                : undefined,
-          });
-        } else {
-          let first = true;
-          for (const url of media) {
-            const caption = first ? text : "";
-            first = false;
-            await deps.sendMessageSignal(signalTarget, caption, {
-              mediaUrl: url,
-              maxBytes: cfg.signal?.mediaMaxMb
-                ? cfg.signal.mediaMaxMb * 1024 * 1024
-                : cfg.agent?.mediaMaxMb
-                  ? cfg.agent.mediaMaxMb * 1024 * 1024
-                  : undefined,
             });
           }
         }

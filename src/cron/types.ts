@@ -18,8 +18,7 @@ export type CronPayload =
         | "last"
         | "whatsapp"
         | "telegram"
-        | "discord"
-        | "signal";
+        | "discord";
       to?: string;
       bestEffortDeliver?: boolean;
     };

@@ -79,6 +79,15 @@ Chạy trên Linux server (Ubuntu), loại bỏ tất cả chức năng không c
 
 Build status: ✅ clean sau khi xóa
 
+### Đã xóa — Signal messenger
+
+| Module | Lý do |
+|--------|-------|
+| `src/signal/` | Signal messenger — không dùng trong DevOps |
+| `src/commands/signal-install.ts` | Command cài signal-cli |
+
+Build status: ✅ clean sau khi xóa
+
 ### Đã xóa — Web UI
 
 | Module | Lý do |

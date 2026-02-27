@@ -14,7 +14,6 @@ const GROUP_SURFACES = new Set([
   "whatsapp",
   "telegram",
   "discord",
-  "signal",
   "webchat",
   "slack",
 ]);
@@ -58,7 +57,6 @@ export type SessionEntry = {
     | "whatsapp"
     | "telegram"
     | "discord"
-    | "signal"
     | "webchat";
   lastTo?: string;
   skillsSnapshot?: SessionSkillSnapshot;

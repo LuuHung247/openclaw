@@ -466,9 +466,7 @@ export async function runInteractiveOnboarding(
     },
   };
 
-  nextConfig = await setupProviders(nextConfig, runtime, {
-    allowSignalInstall: true,
-  });
+  nextConfig = await setupProviders(nextConfig, runtime);
 
   await writeConfigFile(nextConfig);
   runtime.log(`Updated ${CONFIG_PATH_CLAWDIS}`);

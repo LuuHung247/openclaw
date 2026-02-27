@@ -96,7 +96,6 @@ describe("runCronIsolatedAgentTurn", () => {
         sendMessageWhatsApp: vi.fn(),
         sendMessageTelegram: vi.fn(),
         sendMessageDiscord: vi.fn(),
-        sendMessageSignal: vi.fn(),
         sendMessageIMessage: vi.fn(),
       };
       vi.mocked(runEmbeddedPiAgent).mockResolvedValue({
@@ -128,7 +127,6 @@ describe("runCronIsolatedAgentTurn", () => {
         sendMessageWhatsApp: vi.fn(),
         sendMessageTelegram: vi.fn(),
         sendMessageDiscord: vi.fn(),
-        sendMessageSignal: vi.fn(),
         sendMessageIMessage: vi.fn(),
       };
       const long = "a".repeat(2001);
@@ -161,7 +159,6 @@ describe("runCronIsolatedAgentTurn", () => {
         sendMessageWhatsApp: vi.fn(),
         sendMessageTelegram: vi.fn(),
         sendMessageDiscord: vi.fn(),
-        sendMessageSignal: vi.fn(),
         sendMessageIMessage: vi.fn(),
       };
       vi.mocked(runEmbeddedPiAgent).mockResolvedValue({
@@ -201,7 +198,6 @@ describe("runCronIsolatedAgentTurn", () => {
         sendMessageWhatsApp: vi.fn(),
         sendMessageTelegram: vi.fn(),
         sendMessageDiscord: vi.fn(),
-        sendMessageSignal: vi.fn(),
         sendMessageIMessage: vi.fn(),
       };
       vi.mocked(runEmbeddedPiAgent).mockResolvedValue({
@@ -243,7 +239,6 @@ describe("runCronIsolatedAgentTurn", () => {
           chatId: "123",
         }),
         sendMessageDiscord: vi.fn(),
-        sendMessageSignal: vi.fn(),
         sendMessageIMessage: vi.fn(),
       };
       vi.mocked(runEmbeddedPiAgent).mockResolvedValue({
@@ -298,7 +293,6 @@ describe("runCronIsolatedAgentTurn", () => {
           messageId: "d1",
           channelId: "chan",
         }),
-        sendMessageSignal: vi.fn(),
         sendMessageIMessage: vi.fn(),
       };
       vi.mocked(runEmbeddedPiAgent).mockResolvedValue({

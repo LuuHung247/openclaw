@@ -44,27 +44,6 @@ export async function buildProviderSummary(
     );
   }
 
-  const signalEnabled = effective.signal?.enabled !== false;
-  if (!signalEnabled) {
-    lines.push(chalk.cyan("Signal: disabled"));
-  } else {
-    const signalConfigured =
-      Boolean(effective.signal) &&
-      Boolean(
-        effective.signal?.account?.trim() ||
-          effective.signal?.httpUrl?.trim() ||
-          effective.signal?.cliPath?.trim() ||
-          effective.signal?.httpHost?.trim() ||
-          typeof effective.signal?.httpPort === "number" ||
-          typeof effective.signal?.autoStart === "boolean",
-      );
-    lines.push(
-      signalConfigured
-        ? chalk.green("Signal: configured")
-        : chalk.cyan("Signal: not configured"),
-    );
-  }
-
   const imessageEnabled = effective.imessage?.enabled !== false;
   if (!imessageEnabled) {
     lines.push(chalk.cyan("iMessage: disabled"));

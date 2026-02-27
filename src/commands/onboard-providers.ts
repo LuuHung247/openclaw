@@ -11,7 +11,6 @@ import { normalizeE164 } from "../utils.js";
 import { resolveWebAuthDir } from "../web/session.js";
 import { detectBinary, guardCancel } from "./onboard-helpers.js";
 import type { ProviderChoice } from "./onboard-types.js";
-import { installSignalCli } from "./signal-install.js";
 
 async function pathExists(filePath: string): Promise<boolean> {
   try {
@@ -33,7 +32,6 @@ function noteProviderPrimer(): void {
       "WhatsApp: links via WhatsApp Web (scan QR), stores creds for future sends.",
       "Telegram: Bot API (token from @BotFather), replies via your bot.",
       "Discord: Bot token from Discord Developer Portal; invite bot to your server.",
-      "Signal: signal-cli as a linked device (recommended: separate bot number).",
       "iMessage: local imsg CLI (JSON-RPC over stdio) reading Messages DB.",
     ].join("\n"),
     "How providers work",
@@ -154,7 +152,7 @@ async function promptWhatsAppAllowFrom(
 export async function setupProviders(
   cfg: ClawdisConfig,
   runtime: RuntimeEnv,
-  options?: { allowDisable?: boolean; allowSignalInstall?: boolean },
+  options?: { allowDisable?: boolean },
 ): Promise<ClawdisConfig> {
   const whatsappLinked = await detectWhatsAppLinked();
   const telegramEnv = Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim());
@@ -163,11 +161,6 @@ export async function setupProviders(
     telegramEnv || cfg.telegram?.botToken || cfg.telegram?.tokenFile,
   );
   const discordConfigured = Boolean(discordEnv || cfg.discord?.token);
-  const signalConfigured = Boolean(
-    cfg.signal?.account || cfg.signal?.httpUrl || cfg.signal?.httpPort,
-  );
-  const signalCliPath = cfg.signal?.cliPath ?? "signal-cli";
-  const signalCliDetected = await detectBinary(signalCliPath);
   const imessageConfigured = Boolean(
     cfg.imessage?.cliPath || cfg.imessage?.dbPath || cfg.imessage?.allowFrom,
   );
@@ -189,19 +182,11 @@ export async function setupProviders(
           ? chalk.green("configured")
           : chalk.yellow("needs token")
       }`,
-      `Signal: ${
-        signalConfigured
-          ? chalk.green("configured")
-          : chalk.yellow("needs setup")
-      }`,
       `iMessage: ${
         imessageConfigured
           ? chalk.green("configured")
           : chalk.yellow("needs setup")
       }`,
-      `signal-cli: ${
-        signalCliDetected ? chalk.green("found") : chalk.red("missing")
-      } (${signalCliPath})`,
       `imsg: ${
         imessageCliDetected ? chalk.green("found") : chalk.red("missing")
       } (${imessageCliPath})`,
@@ -238,11 +223,6 @@ export async function setupProviders(
           value: "discord",
           label: "Discord (Bot API)",
           hint: discordConfigured ? "configured" : "needs token",
-        },
-        {
-          value: "signal",
-          label: "Signal (signal-cli)",
-          hint: signalCliDetected ? "signal-cli found" : "signal-cli missing",
         },
         {
           value: "imessage",
@@ -438,88 +418,6 @@ export async function setupProviders(
     }
   }
 
-  if (selection.includes("signal")) {
-    let resolvedCliPath = signalCliPath;
-    let cliDetected = signalCliDetected;
-    if (options?.allowSignalInstall) {
-      const wantsInstall = guardCancel(
-        await confirm({
-          message: cliDetected
-            ? "signal-cli detected. Reinstall/update now?"
-            : "signal-cli not found. Install now?",
-          initialValue: !cliDetected,
-        }),
-        runtime,
-      );
-      if (wantsInstall) {
-        try {
-          const result = await installSignalCli(runtime);
-          if (result.ok && result.cliPath) {
-            cliDetected = true;
-            resolvedCliPath = result.cliPath;
-            note(`Installed signal-cli at ${result.cliPath}`, "Signal");
-          } else if (!result.ok) {
-            note(result.error ?? "signal-cli install failed.", "Signal");
-          }
-        } catch (err) {
-          note(`signal-cli install failed: ${String(err)}`, "Signal");
-        }
-      }
-    }
-
-    if (!cliDetected) {
-      note(
-        "signal-cli not found. Install it, then rerun this step or set signal.cliPath.",
-        "Signal",
-      );
-    }
-
-    let account = cfg.signal?.account ?? "";
-    if (account) {
-      const keep = guardCancel(
-        await confirm({
-          message: `Signal account set (${account}). Keep it?`,
-          initialValue: true,
-        }),
-        runtime,
-      );
-      if (!keep) account = "";
-    }
-
-    if (!account) {
-      account = String(
-        guardCancel(
-          await text({
-            message: "Signal bot number (E.164)",
-            validate: (value) => (value?.trim() ? undefined : "Required"),
-          }),
-          runtime,
-        ),
-      ).trim();
-    }
-
-    if (account) {
-      next = {
-        ...next,
-        signal: {
-          ...next.signal,
-          enabled: true,
-          account,
-          cliPath: resolvedCliPath ?? "signal-cli",
-        },
-      };
-    }
-
-    note(
-      [
-        'Link device with: signal-cli link -n "Clawdis"',
-        "Scan QR in Signal → Linked Devices",
-        "Then run: clawdis gateway call providers.status --params '{\"probe\":true}'",
-      ].join("\n"),
-      "Signal next steps",
-    );
-  }
-
   if (selection.includes("imessage")) {
     let resolvedCliPath = imessageCliPath;
     if (!imessageCliDetected) {
@@ -587,22 +485,6 @@ export async function setupProviders(
         next = {
           ...next,
           discord: { ...next.discord, enabled: false },
-        };
-      }
-    }
-
-    if (!selection.includes("signal") && signalConfigured) {
-      const disable = guardCancel(
-        await confirm({
-          message: "Disable Signal provider?",
-          initialValue: false,
-        }),
-        runtime,
-      );
-      if (disable) {
-        next = {
-          ...next,
-          signal: { ...next.signal, enabled: false },
         };
       }
     }

@@ -14,7 +14,6 @@ export type ProviderChoice =
   | "whatsapp"
   | "telegram"
   | "discord"
-  | "signal"
   | "imessage";
 
 export type OnboardOptions = {

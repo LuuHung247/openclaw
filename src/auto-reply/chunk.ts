@@ -8,7 +8,6 @@ export type TextChunkSurface =
   | "whatsapp"
   | "telegram"
   | "discord"
-  | "signal"
   | "imessage"
   | "webchat";
 
@@ -16,7 +15,6 @@ const DEFAULT_CHUNK_LIMIT_BY_SURFACE: Record<TextChunkSurface, number> = {
   whatsapp: 4000,
   telegram: 4000,
   discord: 2000,
-  signal: 4000,
   imessage: 4000,
   webchat: 4000,
 };
@@ -30,7 +28,6 @@ export function resolveTextChunkLimit(
     if (surface === "whatsapp") return cfg?.whatsapp?.textChunkLimit;
     if (surface === "telegram") return cfg?.telegram?.textChunkLimit;
     if (surface === "discord") return cfg?.discord?.textChunkLimit;
-    if (surface === "signal") return cfg?.signal?.textChunkLimit;
     if (surface === "imessage") return cfg?.imessage?.textChunkLimit;
     return undefined;
   })();

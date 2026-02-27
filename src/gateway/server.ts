@@ -136,8 +136,6 @@ import { setCommandLaneConcurrency } from "../process/command-queue.js";
 import { runExec } from "../process/exec.js";
 import { monitorWebProvider, webAuthExists } from "../providers/web/index.js";
 import { defaultRuntime } from "../runtime.js";
-import { monitorSignalProvider, sendMessageSignal } from "../signal/index.js";
-import { probeSignal, type SignalProbe } from "../signal/probe.js";
 import { monitorTelegramProvider } from "../telegram/monitor.js";
 import { probeTelegram, type TelegramProbe } from "../telegram/probe.js";
 import { sendMessageTelegram } from "../telegram/send.js";
@@ -281,11 +279,9 @@ const logWsControl = log.child("ws");
 const logWhatsApp = logProviders.child("whatsapp");
 const logTelegram = logProviders.child("telegram");
 const logDiscord = logProviders.child("discord");
-const logSignal = logProviders.child("signal");
 const whatsappRuntimeEnv = runtimeForLogger(logWhatsApp);
 const telegramRuntimeEnv = runtimeForLogger(logTelegram);
 const discordRuntimeEnv = runtimeForLogger(logDiscord);
-const signalRuntimeEnv = runtimeForLogger(logSignal);
 
 function resolveBonjourCliPath(): string | undefined {
   const envPath = process.env.CLAWDIS_CLI_PATH?.trim();
@@ -1409,8 +1405,7 @@ export async function startGatewayServer(
             | "last"
             | "whatsapp"
             | "telegram"
-            | "discord"
-            | "signal";
+            | "discord";
           to?: string;
           thinking?: string;
           timeoutSeconds?: number;
@@ -1435,7 +1430,6 @@ export async function startGatewayServer(
       channelRaw === "whatsapp" ||
       channelRaw === "telegram" ||
       channelRaw === "discord" ||
-      channelRaw === "signal" ||
       channelRaw === "last"
         ? channelRaw
         : channelRaw === undefined
@@ -1444,7 +1438,7 @@ export async function startGatewayServer(
     if (channel === null) {
       return {
         ok: false,
-        error: "channel must be last|whatsapp|telegram|discord|signal",
+        error: "channel must be last|whatsapp|telegram|discord",
       };
     }
     const toRaw = payload.to;
@@ -1499,8 +1493,7 @@ export async function startGatewayServer(
       | "last"
       | "whatsapp"
       | "telegram"
-      | "discord"
-      | "signal";
+      | "discord";
     to?: string;
     thinking?: string;
     timeoutSeconds?: number;
@@ -1760,11 +1753,9 @@ export async function startGatewayServer(
   let whatsappAbort: AbortController | null = null;
   let telegramAbort: AbortController | null = null;
   let discordAbort: AbortController | null = null;
-  let signalAbort: AbortController | null = null;
   let whatsappTask: Promise<unknown> | null = null;
   let telegramTask: Promise<unknown> | null = null;
   let discordTask: Promise<unknown> | null = null;
-  let signalTask: Promise<unknown> | null = null;
   let whatsappRuntime: WebProviderStatus = {
     running: false,
     connected: false,
@@ -1798,19 +1789,6 @@ export async function startGatewayServer(
     lastStartAt: null,
     lastStopAt: null,
     lastError: null,
-  };
-  let signalRuntime: {
-    running: boolean;
-    lastStartAt?: number | null;
-    lastStopAt?: number | null;
-    lastError?: string | null;
-    baseUrl?: string | null;
-  } = {
-    running: false,
-    lastStartAt: null,
-    lastStopAt: null,
-    lastError: null,
-    baseUrl: null,
   };
   const clients = new Set<Client>();
   let seq = 0;
@@ -2214,124 +2192,10 @@ export async function startGatewayServer(
     };
   };
 
-  const startSignalProvider = async () => {
-    if (signalTask) return;
-    const cfg = loadConfig();
-    if (!cfg.signal) {
-      signalRuntime = {
-        ...signalRuntime,
-        running: false,
-        lastError: "not configured",
-      };
-      // keep quiet by default; this is a normal state
-      if (isVerbose()) {
-        logSignal.debug("signal provider not configured (no signal config)");
-      }
-      return;
-    }
-    if (cfg.signal?.enabled === false) {
-      signalRuntime = {
-        ...signalRuntime,
-        running: false,
-        lastError: "disabled",
-      };
-      if (isVerbose()) {
-        logSignal.debug("signal provider disabled (signal.enabled=false)");
-      }
-      return;
-    }
-    const signalCfg = cfg.signal;
-    const signalMeaningfullyConfigured = Boolean(
-      signalCfg.account?.trim() ||
-        signalCfg.httpUrl?.trim() ||
-        signalCfg.cliPath?.trim() ||
-        signalCfg.httpHost?.trim() ||
-        typeof signalCfg.httpPort === "number" ||
-        typeof signalCfg.autoStart === "boolean",
-    );
-    if (!signalMeaningfullyConfigured) {
-      signalRuntime = {
-        ...signalRuntime,
-        running: false,
-        lastError: "not configured",
-      };
-      // keep quiet by default; this is a normal state
-      if (isVerbose()) {
-        logSignal.debug(
-          "signal provider not configured (signal config present but missing required fields)",
-        );
-      }
-      return;
-    }
-    const host = cfg.signal?.httpHost?.trim() || "127.0.0.1";
-    const port = cfg.signal?.httpPort ?? 8080;
-    const baseUrl = cfg.signal?.httpUrl?.trim() || `http://${host}:${port}`;
-    logSignal.info(`starting provider (${baseUrl})`);
-    signalAbort = new AbortController();
-    signalRuntime = {
-      ...signalRuntime,
-      running: true,
-      lastStartAt: Date.now(),
-      lastError: null,
-      baseUrl,
-    };
-    const task = monitorSignalProvider({
-      baseUrl,
-      account: cfg.signal?.account,
-      cliPath: cfg.signal?.cliPath,
-      httpHost: cfg.signal?.httpHost,
-      httpPort: cfg.signal?.httpPort,
-      autoStart: cfg.signal?.autoStart,
-      receiveMode: cfg.signal?.receiveMode,
-      ignoreAttachments: cfg.signal?.ignoreAttachments,
-      ignoreStories: cfg.signal?.ignoreStories,
-      sendReadReceipts: cfg.signal?.sendReadReceipts,
-      allowFrom: cfg.signal?.allowFrom,
-      mediaMaxMb: cfg.signal?.mediaMaxMb,
-      runtime: signalRuntimeEnv,
-      abortSignal: signalAbort.signal,
-    })
-      .catch((err) => {
-        signalRuntime = {
-          ...signalRuntime,
-          lastError: formatError(err),
-        };
-        logSignal.error(`provider exited: ${formatError(err)}`);
-      })
-      .finally(() => {
-        signalAbort = null;
-        signalTask = null;
-        signalRuntime = {
-          ...signalRuntime,
-          running: false,
-          lastStopAt: Date.now(),
-        };
-      });
-    signalTask = task;
-  };
-
-  const stopSignalProvider = async () => {
-    if (!signalAbort && !signalTask) return;
-    signalAbort?.abort();
-    try {
-      await signalTask;
-    } catch {
-      // ignore
-    }
-    signalAbort = null;
-    signalTask = null;
-    signalRuntime = {
-      ...signalRuntime,
-      running: false,
-      lastStopAt: Date.now(),
-    };
-  };
-
   const startProviders = async () => {
     await startWhatsAppProvider();
     await startDiscordProvider();
     await startTelegramProvider();
-    await startSignalProvider();
   };
 
   const broadcast = (
@@ -3355,8 +3219,7 @@ export async function startGatewayServer(
         const channel = channelRaw.toLowerCase();
         const provider =
           channel === "whatsapp" ||
-          channel === "telegram" ||
-          channel === "signal"
+          channel === "telegram"
             ? channel
             : undefined;
         const to =
@@ -4246,31 +4109,6 @@ export async function startGatewayServer(
                 discordLastProbeAt = Date.now();
               }
 
-              const signalCfg = cfg.signal;
-              const signalEnabled = signalCfg?.enabled !== false;
-              const signalHost = signalCfg?.httpHost?.trim() || "127.0.0.1";
-              const signalPort = signalCfg?.httpPort ?? 8080;
-              const signalBaseUrl =
-                signalCfg?.httpUrl?.trim() ||
-                `http://${signalHost}:${signalPort}`;
-              const signalConfigured =
-                Boolean(signalCfg) &&
-                signalEnabled &&
-                Boolean(
-                  signalCfg?.account?.trim() ||
-                    signalCfg?.httpUrl?.trim() ||
-                    signalCfg?.cliPath?.trim() ||
-                    signalCfg?.httpHost?.trim() ||
-                    typeof signalCfg?.httpPort === "number" ||
-                    typeof signalCfg?.autoStart === "boolean",
-                );
-              let signalProbe: SignalProbe | undefined;
-              let signalLastProbeAt: number | null = null;
-              if (probe && signalConfigured) {
-                signalProbe = await probeSignal(signalBaseUrl, timeoutMs);
-                signalLastProbeAt = Date.now();
-              }
-
               const linked = await webAuthExists();
               const authAgeMs = getWebAuthAgeMs();
               const self = readWebSelfId();
@@ -4313,16 +4151,6 @@ export async function startGatewayServer(
                     lastError: discordRuntime.lastError ?? null,
                     probe: discordProbe,
                     lastProbeAt: discordLastProbeAt,
-                  },
-                  signal: {
-                    configured: signalConfigured,
-                    baseUrl: signalBaseUrl,
-                    running: signalRuntime.running,
-                    lastStartAt: signalRuntime.lastStartAt ?? null,
-                    lastStopAt: signalRuntime.lastStopAt ?? null,
-                    lastError: signalRuntime.lastError ?? null,
-                    probe: signalProbe,
-                    lastProbeAt: signalLastProbeAt,
                   },
                 },
                 undefined,
@@ -6216,28 +6044,6 @@ export async function startGatewayServer(
                     payload,
                   });
                   respond(true, payload, undefined, { provider });
-                } else if (provider === "signal") {
-                  const cfg = loadConfig();
-                  const host = cfg.signal?.httpHost?.trim() || "127.0.0.1";
-                  const port = cfg.signal?.httpPort ?? 8080;
-                  const baseUrl =
-                    cfg.signal?.httpUrl?.trim() || `http://${host}:${port}`;
-                  const result = await sendMessageSignal(to, message, {
-                    mediaUrl: params.mediaUrl,
-                    baseUrl,
-                    account: cfg.signal?.account,
-                  });
-                  const payload = {
-                    runId: idem,
-                    messageId: result.messageId,
-                    provider,
-                  };
-                  dedupe.set(`send:${idem}`, {
-                    ts: Date.now(),
-                    ok: true,
-                    payload,
-                  });
-                  respond(true, payload, undefined, { provider });
                 } else {
                   const result = await sendMessageWhatsApp(to, message, {
                     mediaUrl: params.mediaUrl,
@@ -6375,7 +6181,6 @@ export async function startGatewayServer(
                   requestedChannel === "whatsapp" ||
                   requestedChannel === "telegram" ||
                   requestedChannel === "discord" ||
-                  requestedChannel === "signal" ||
                   requestedChannel === "webchat"
                 ) {
                   return requestedChannel;
@@ -6394,8 +6199,7 @@ export async function startGatewayServer(
                 if (
                   resolvedChannel === "whatsapp" ||
                   resolvedChannel === "telegram" ||
-                  resolvedChannel === "discord" ||
-                  resolvedChannel === "signal"
+                  resolvedChannel === "discord"
                 ) {
                   return lastTo || undefined;
                 }
@@ -6644,7 +6448,6 @@ export async function startGatewayServer(
       await stopWhatsAppProvider();
       await stopTelegramProvider();
       await stopDiscordProvider();
-      await stopSignalProvider();
       await stopGmailWatcher();
       cron.stop();
       heartbeatRunner.stop();
@@ -6683,7 +6486,7 @@ export async function startGatewayServer(
         await stopBrowserControlServerIfStarted().catch(() => {});
       }
       await Promise.allSettled(
-        [whatsappTask, telegramTask, signalTask].filter(
+        [whatsappTask, telegramTask, discordTask].filter(
           Boolean,
         ) as Array<Promise<unknown>>,
       );

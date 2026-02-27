@@ -140,7 +140,6 @@ describe("config identity defaults", () => {
             whatsapp: { allowFrom: ["+15555550123"], textChunkLimit: 4444 },
             telegram: { enabled: true, textChunkLimit: 3333 },
             discord: { enabled: true, textChunkLimit: 1999 },
-            signal: { enabled: true, textChunkLimit: 2222 },
             imessage: { enabled: true, textChunkLimit: 1111 },
           },
           null,
@@ -156,7 +155,6 @@ describe("config identity defaults", () => {
       expect(cfg.whatsapp?.textChunkLimit).toBe(4444);
       expect(cfg.telegram?.textChunkLimit).toBe(3333);
       expect(cfg.discord?.textChunkLimit).toBe(1999);
-      expect(cfg.signal?.textChunkLimit).toBe(2222);
       expect(cfg.imessage?.textChunkLimit).toBe(1111);
 
       const legacy = (cfg.messages as unknown as Record<string, unknown>)

@@ -667,7 +667,6 @@ function defaultQueueModeForSurface(surface?: string): QueueMode {
   if (normalized === "whatsapp") return "collect";
   if (normalized === "telegram") return "collect";
   if (normalized === "imessage") return "collect";
-  if (normalized === "signal") return "collect";
   return "collect";
 }
 

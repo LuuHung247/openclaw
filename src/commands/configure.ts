@@ -565,7 +565,6 @@ export async function runConfigureWizard(
   if (selected.includes("providers")) {
     nextConfig = await setupProviders(nextConfig, runtime, {
       allowDisable: true,
-      allowSignalInstall: true,
     });
   }
 

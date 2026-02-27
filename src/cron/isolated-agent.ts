@@ -59,8 +59,7 @@ function resolveDeliveryTarget(
       | "last"
       | "whatsapp"
       | "telegram"
-      | "discord"
-      | "signal";
+      | "discord";
     to?: string;
   },
 ) {
@@ -76,9 +75,15 @@ function resolveDeliveryTarget(
   const storePath = resolveStorePath(sessionCfg?.store);
   const store = loadSessionStore(storePath);
   const main = store[mainKey];
-  const lastChannel =
+  const lastChannelRaw =
     main?.lastChannel && main.lastChannel !== "webchat"
       ? main.lastChannel
+      : undefined;
+  const lastChannel =
+    lastChannelRaw === "whatsapp" ||
+    lastChannelRaw === "telegram" ||
+    lastChannelRaw === "discord"
+      ? lastChannelRaw
       : undefined;
   const lastTo = typeof main?.lastTo === "string" ? main.lastTo.trim() : "";
 
@@ -86,8 +91,7 @@ function resolveDeliveryTarget(
     if (
       requestedChannel === "whatsapp" ||
       requestedChannel === "telegram" ||
-      requestedChannel === "discord" ||
-      requestedChannel === "signal"
+      requestedChannel === "discord"
     ) {
       return requestedChannel;
     }
@@ -419,45 +423,6 @@ export async function runCronIsolatedAgentTurn(params: {
               first = false;
               await params.deps.sendMessageDiscord(discordTarget, caption, {
                 token: process.env.DISCORD_BOT_TOKEN,
-                mediaUrl: url,
-              });
-            }
-          }
-        }
-      } catch (err) {
-        if (!bestEffortDeliver)
-          return { status: "error", summary, error: String(err) };
-        return { status: "ok", summary };
-      }
-    } else if (resolvedDelivery.channel === "signal") {
-      if (!resolvedDelivery.to) {
-        if (!bestEffortDeliver)
-          return {
-            status: "error",
-            summary,
-            error: "Cron delivery to Signal requires a recipient.",
-          };
-        return {
-          status: "skipped",
-          summary: "Delivery skipped (no Signal recipient).",
-        };
-      }
-      const to = resolvedDelivery.to;
-      const textLimit = resolveTextChunkLimit(params.cfg, "signal");
-      try {
-        for (const payload of payloads) {
-          const mediaList =
-            payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []);
-          if (mediaList.length === 0) {
-            for (const chunk of chunkText(payload.text ?? "", textLimit)) {
-              await params.deps.sendMessageSignal(to, chunk);
-            }
-          } else {
-            let first = true;
-            for (const url of mediaList) {
-              const caption = first ? (payload.text ?? "") : "";
-              first = false;
-              await params.deps.sendMessageSignal(to, caption, {
                 mediaUrl: url,
               });
             }
