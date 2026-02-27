@@ -420,15 +420,12 @@ export async function agentCommand(
   const payloads = result.payloads ?? [];
   const deliver = opts.deliver === true;
   const bestEffortDeliver = opts.bestEffortDeliver === true;
-  const deliveryProviderRaw = (opts.provider ?? "whatsapp").toLowerCase();
-  const deliveryProvider =
-    deliveryProviderRaw === "imsg" ? "imessage" : deliveryProviderRaw;
+  const deliveryProvider = (opts.provider ?? "whatsapp").toLowerCase();
 
   const whatsappTarget = opts.to ? normalizeE164(opts.to) : allowFrom[0];
   const telegramTarget = opts.to?.trim() || undefined;
   const discordTarget = opts.to?.trim() || undefined;
   const signalTarget = opts.to?.trim() || undefined;
-  const imessageTarget = opts.to?.trim() || undefined;
 
   const logDeliveryError = (err: unknown) => {
     const deliveryTarget =
@@ -440,9 +437,7 @@ export async function agentCommand(
             ? discordTarget
             : deliveryProvider === "signal"
               ? signalTarget
-              : deliveryProvider === "imessage"
-                ? imessageTarget
-                : undefined;
+              : undefined;
     const message = `Delivery failed (${deliveryProvider}${deliveryTarget ? ` to ${deliveryTarget}` : ""}): ${String(err)}`;
     runtime.error?.(message);
     if (!runtime.error) runtime.log(message);
@@ -475,13 +470,6 @@ export async function agentCommand(
       if (!bestEffortDeliver) throw err;
       logDeliveryError(err);
     }
-    if (deliveryProvider === "imessage" && !imessageTarget) {
-      const err = new Error(
-        "Delivering to iMessage requires --to <handle|chat_id:ID>",
-      );
-      if (!bestEffortDeliver) throw err;
-      logDeliveryError(err);
-    }
     if (deliveryProvider === "webchat") {
       const err = new Error(
         "Delivering to WebChat is not supported via `clawdis agent`; use WhatsApp/Telegram or run with --deliver=false.",
@@ -494,7 +482,6 @@ export async function agentCommand(
       deliveryProvider !== "telegram" &&
       deliveryProvider !== "discord" &&
       deliveryProvider !== "signal" &&
-      deliveryProvider !== "imessage" &&
       deliveryProvider !== "webchat"
     ) {
       const err = new Error(`Unknown provider: ${deliveryProvider}`);
@@ -528,8 +515,7 @@ export async function agentCommand(
     deliveryProvider === "whatsapp" ||
     deliveryProvider === "telegram" ||
     deliveryProvider === "discord" ||
-    deliveryProvider === "signal" ||
-    deliveryProvider === "imessage"
+    deliveryProvider === "signal"
       ? resolveTextChunkLimit(cfg, deliveryProvider)
       : resolveTextChunkLimit(cfg, "whatsapp");
 
@@ -651,37 +637,5 @@ export async function agentCommand(
       }
     }
 
-    if (deliveryProvider === "imessage" && imessageTarget) {
-      try {
-        if (media.length === 0) {
-          for (const chunk of chunkText(text, deliveryTextLimit)) {
-            await deps.sendMessageIMessage(imessageTarget, chunk, {
-              maxBytes: cfg.imessage?.mediaMaxMb
-                ? cfg.imessage.mediaMaxMb * 1024 * 1024
-                : cfg.agent?.mediaMaxMb
-                  ? cfg.agent.mediaMaxMb * 1024 * 1024
-                  : undefined,
-            });
-          }
-        } else {
-          let first = true;
-          for (const url of media) {
-            const caption = first ? text : "";
-            first = false;
-            await deps.sendMessageIMessage(imessageTarget, caption, {
-              mediaUrl: url,
-              maxBytes: cfg.imessage?.mediaMaxMb
-                ? cfg.imessage.mediaMaxMb * 1024 * 1024
-                : cfg.agent?.mediaMaxMb
-                  ? cfg.agent.mediaMaxMb * 1024 * 1024
-                  : undefined,
-            });
-          }
-        }
-      } catch (err) {
-        if (!bestEffortDeliver) throw err;
-        logDeliveryError(err);
-      }
-    }
   }
 }

@@ -29,16 +29,6 @@ import {
   normalizeThinkLevel,
   normalizeVerboseLevel,
 } from "../auto-reply/thinking.js";
-import {
-  CANVAS_HOST_PATH,
-  handleA2uiHttpRequest,
-} from "../canvas-host/a2ui.js";
-import {
-  type CanvasHostHandler,
-  type CanvasHostServer,
-  createCanvasHostHandler,
-  startCanvasHost,
-} from "../canvas-host/server.js";
 import { createDefaultDeps } from "../cli/deps.js";
 import { agentCommand } from "../commands/agent.js";
 import { getHealthSnapshot, type HealthSummary } from "../commands/health.js";
@@ -79,11 +69,6 @@ import { type DiscordProbe, probeDiscord } from "../discord/probe.js";
 import { isVerbose } from "../globals.js";
 import { startGmailWatcher, stopGmailWatcher } from "../hooks/gmail-watcher.js";
 import {
-  monitorIMessageProvider,
-  sendMessageIMessage,
-} from "../imessage/index.js";
-import { type IMessageProbe, probeIMessage } from "../imessage/probe.js";
-import {
   clearAgentRunContext,
   getAgentRunContext,
   onAgentEvent,
@@ -91,7 +76,6 @@ import {
 } from "../infra/agent-events.js";
 import { startGatewayBonjourAdvertiser } from "../infra/bonjour.js";
 import { startNodeBridgeServer } from "../infra/bridge/server.js";
-import { resolveCanvasHostUrl } from "../infra/canvas-host-url.js";
 import { GatewayLockError } from "../infra/gateway-lock.js";
 import {
   getLastHeartbeatEvent,
@@ -286,7 +270,6 @@ function sendJson(
 }
 
 const log = createSubsystemLogger("gateway");
-const logCanvas = log.child("canvas");
 const logBridge = log.child("bridge");
 const logDiscovery = log.child("discovery");
 const logTailscale = log.child("tailscale");
@@ -300,13 +283,10 @@ const logWhatsApp = logProviders.child("whatsapp");
 const logTelegram = logProviders.child("telegram");
 const logDiscord = logProviders.child("discord");
 const logSignal = logProviders.child("signal");
-const logIMessage = logProviders.child("imessage");
-const canvasRuntime = runtimeForLogger(logCanvas);
 const whatsappRuntimeEnv = runtimeForLogger(logWhatsApp);
 const telegramRuntimeEnv = runtimeForLogger(logTelegram);
 const discordRuntimeEnv = runtimeForLogger(logDiscord);
 const signalRuntimeEnv = runtimeForLogger(logSignal);
-const imessageRuntimeEnv = runtimeForLogger(logIMessage);
 
 function resolveBonjourCliPath(): string | undefined {
   const envPath = process.env.CLAWDIS_CLI_PATH?.trim();
@@ -591,10 +571,6 @@ export type GatewayServerOptions = {
    * Override gateway Tailscale exposure configuration (merges with config).
    */
   tailscale?: import("../config/config.js").GatewayTailscaleConfig;
-  /**
-   * Test-only: allow canvas host startup even when NODE_ENV/VITEST would disable it.
-   */
-  allowCanvasHostInTests?: boolean;
 };
 
 function isLoopbackAddress(ip: string | undefined): boolean {
@@ -1386,9 +1362,6 @@ export async function startGatewayServer(
     allowTailscale,
   };
   const hooksConfig = resolveHooksConfig(cfgAtStart);
-  const canvasHostEnabled =
-    process.env.CLAWDIS_SKIP_CANVAS_HOST !== "1" &&
-    cfgAtStart.canvasHost?.enabled !== false;
   assertGatewayAuthConfigured(resolvedAuth);
   if (tailscaleMode === "funnel" && authMode !== "password") {
     throw new Error(
@@ -1445,8 +1418,7 @@ export async function startGatewayServer(
             | "whatsapp"
             | "telegram"
             | "discord"
-            | "signal"
-            | "imessage";
+            | "signal";
           to?: string;
           thinking?: string;
           timeoutSeconds?: number;
@@ -1472,18 +1444,15 @@ export async function startGatewayServer(
       channelRaw === "telegram" ||
       channelRaw === "discord" ||
       channelRaw === "signal" ||
-      channelRaw === "imessage" ||
       channelRaw === "last"
         ? channelRaw
-        : channelRaw === "imsg"
-          ? "imessage"
-          : channelRaw === undefined
-            ? "last"
-            : null;
+        : channelRaw === undefined
+          ? "last"
+          : null;
     if (channel === null) {
       return {
         ok: false,
-        error: "channel must be last|whatsapp|telegram|discord|signal|imessage",
+        error: "channel must be last|whatsapp|telegram|discord|signal",
       };
     }
     const toRaw = payload.to;
@@ -1539,8 +1508,7 @@ export async function startGatewayServer(
       | "whatsapp"
       | "telegram"
       | "discord"
-      | "signal"
-      | "imessage";
+      | "signal";
     to?: string;
     thinking?: string;
     timeoutSeconds?: number;
@@ -1601,27 +1569,6 @@ export async function startGatewayServer(
 
     return runId;
   };
-  let canvasHost: CanvasHostHandler | null = null;
-  let canvasHostServer: CanvasHostServer | null = null;
-  if (canvasHostEnabled) {
-    try {
-      const handler = await createCanvasHostHandler({
-        runtime: canvasRuntime,
-        rootDir: cfgAtStart.canvasHost?.root,
-        basePath: CANVAS_HOST_PATH,
-        allowInTests: opts.allowCanvasHostInTests,
-      });
-      if (handler.rootDir) {
-        canvasHost = handler;
-        logCanvas.info(
-          `canvas host mounted at http://${bindHost}:${port}${CANVAS_HOST_PATH}/ (root ${handler.rootDir})`,
-        );
-      }
-    } catch (err) {
-      logCanvas.warn(`canvas host failed to start: ${String(err)}`);
-    }
-  }
-
   const handleHooksRequest = async (
     req: IncomingMessage,
     res: import("node:http").ServerResponse,
@@ -1753,10 +1700,6 @@ export async function startGatewayServer(
 
     void (async () => {
       if (await handleHooksRequest(req, res)) return;
-      if (canvasHost) {
-        if (await handleA2uiHttpRequest(req, res)) return;
-        if (await canvasHost.handleHttpRequest(req, res)) return;
-      }
       if (controlUiEnabled) {
         if (handleControlUiHttpRequest(req, res)) return;
       }
@@ -1820,7 +1763,6 @@ export async function startGatewayServer(
     maxPayload: MAX_PAYLOAD_BYTES,
   });
   httpServer.on("upgrade", (req, socket, head) => {
-    if (canvasHost?.handleUpgrade(req, socket, head)) return;
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
     });
@@ -1829,12 +1771,10 @@ export async function startGatewayServer(
   let telegramAbort: AbortController | null = null;
   let discordAbort: AbortController | null = null;
   let signalAbort: AbortController | null = null;
-  let imessageAbort: AbortController | null = null;
   let whatsappTask: Promise<unknown> | null = null;
   let telegramTask: Promise<unknown> | null = null;
   let discordTask: Promise<unknown> | null = null;
   let signalTask: Promise<unknown> | null = null;
-  let imessageTask: Promise<unknown> | null = null;
   let whatsappRuntime: WebProviderStatus = {
     running: false,
     connected: false,
@@ -1881,21 +1821,6 @@ export async function startGatewayServer(
     lastStopAt: null,
     lastError: null,
     baseUrl: null,
-  };
-  let imessageRuntime: {
-    running: boolean;
-    lastStartAt?: number | null;
-    lastStopAt?: number | null;
-    lastError?: string | null;
-    cliPath?: string | null;
-    dbPath?: string | null;
-  } = {
-    running: false,
-    lastStartAt: null,
-    lastStopAt: null,
-    lastError: null,
-    cliPath: null,
-    dbPath: null,
   };
   const clients = new Set<Client>();
   let seq = 0;
@@ -2412,101 +2337,11 @@ export async function startGatewayServer(
     };
   };
 
-  const startIMessageProvider = async () => {
-    if (imessageTask) return;
-    const cfg = loadConfig();
-    if (!cfg.imessage) {
-      imessageRuntime = {
-        ...imessageRuntime,
-        running: false,
-        lastError: "not configured",
-      };
-      // keep quiet by default; this is a normal state
-      if (isVerbose()) {
-        logIMessage.debug(
-          "imessage provider not configured (no imessage config)",
-        );
-      }
-      return;
-    }
-    if (cfg.imessage?.enabled === false) {
-      imessageRuntime = {
-        ...imessageRuntime,
-        running: false,
-        lastError: "disabled",
-      };
-      if (isVerbose()) {
-        logIMessage.debug(
-          "imessage provider disabled (imessage.enabled=false)",
-        );
-      }
-      return;
-    }
-    const cliPath = cfg.imessage?.cliPath?.trim() || "imsg";
-    const dbPath = cfg.imessage?.dbPath?.trim();
-    logIMessage.info(
-      `starting provider (${cliPath}${dbPath ? ` db=${dbPath}` : ""})`,
-    );
-    imessageAbort = new AbortController();
-    imessageRuntime = {
-      ...imessageRuntime,
-      running: true,
-      lastStartAt: Date.now(),
-      lastError: null,
-      cliPath,
-      dbPath: dbPath ?? null,
-    };
-    const task = monitorIMessageProvider({
-      cliPath,
-      dbPath,
-      allowFrom: cfg.imessage?.allowFrom,
-      includeAttachments: cfg.imessage?.includeAttachments,
-      mediaMaxMb: cfg.imessage?.mediaMaxMb,
-      runtime: imessageRuntimeEnv,
-      abortSignal: imessageAbort.signal,
-    })
-      .catch((err) => {
-        imessageRuntime = {
-          ...imessageRuntime,
-          lastError: formatError(err),
-        };
-        logIMessage.error(`provider exited: ${formatError(err)}`);
-      })
-      .finally(() => {
-        imessageAbort = null;
-        imessageTask = null;
-        imessageRuntime = {
-          ...imessageRuntime,
-          running: false,
-          lastStopAt: Date.now(),
-        };
-      });
-    imessageTask = task;
-  };
-
-  const stopIMessageProvider = async () => {
-    if (!imessageAbort && !imessageTask) return;
-    imessageAbort?.abort();
-    try {
-      await imessageTask;
-    } catch {
-      // ignore
-    }
-    imessageAbort = null;
-    imessageTask = null;
-    imessageRuntime = {
-      ...imessageRuntime,
-      running: false,
-      lastStopAt: Date.now(),
-    };
-  };
-
   const startProviders = async () => {
     await startWhatsAppProvider();
     await startDiscordProvider();
     await startTelegramProvider();
     await startSignalProvider();
-    await startIMessageProvider();
   };
 
   const broadcast = (
@@ -2601,31 +2436,6 @@ export async function startGatewayServer(
     }
     return "0.0.0.0";
   })();
-
-  const canvasHostPort = (() => {
-    const configured = cfgAtStart.canvasHost?.port;
-    if (typeof configured === "number" && configured > 0) return configured;
-    return 18793;
-  })();
-
-  if (canvasHostEnabled && bridgeEnabled && bridgeHost) {
-    try {
-      const started = await startCanvasHost({
-        runtime: canvasRuntime,
-        rootDir: cfgAtStart.canvasHost?.root,
-        port: canvasHostPort,
-        listenHost: bridgeHost,
-        allowInTests: opts.allowCanvasHostInTests,
-      });
-      if (started.port > 0) {
-        canvasHostServer = started;
-      }
-    } catch (err) {
-      logCanvas.warn(
-        `failed to start on ${bridgeHost}:${canvasHostPort}: ${String(err)}`,
-      );
-    }
-  }
 
   const bridgeSubscribe = (nodeId: string, sessionKey: string) => {
     const normalizedNodeId = nodeId.trim();
@@ -3556,8 +3366,7 @@ export async function startGatewayServer(
         const provider =
           channel === "whatsapp" ||
           channel === "telegram" ||
-          channel === "signal" ||
-          channel === "imessage"
+          channel === "signal"
             ? channel
             : undefined;
         const to =
@@ -3648,14 +3457,6 @@ export async function startGatewayServer(
   };
 
   const machineDisplayName = await getMachineDisplayName();
-  const canvasHostPortForBridge = canvasHostServer?.port;
-  const canvasHostHostForBridge =
-    canvasHostServer &&
-    bridgeHost &&
-    bridgeHost !== "0.0.0.0" &&
-    bridgeHost !== "::"
-      ? bridgeHost
-      : undefined;
 
   if (bridgeEnabled && bridgePort > 0 && bridgeHost) {
     try {
@@ -3663,8 +3464,6 @@ export async function startGatewayServer(
         host: bridgeHost,
         port: bridgePort,
         serverName: machineDisplayName,
-        canvasHostPort: canvasHostPortForBridge,
-        canvasHostHost: canvasHostHostForBridge,
         onRequest: (nodeId, req) => handleBridgeRequest(nodeId, req),
         onAuthenticated: async (node) => {
           const host = node.displayName?.trim() || node.nodeId;
@@ -3780,7 +3579,6 @@ export async function startGatewayServer(
       instanceName: formatBonjourInstanceName(machineDisplayName),
       gatewayPort: port,
       bridgePort: bridge?.port,
-      canvasPort: canvasHostPortForBridge,
       sshPort,
       tailnetDns,
       cliPath: resolveBonjourCliPath(),
@@ -4039,19 +3837,6 @@ export async function startGatewayServer(
     const remoteAddr = (
       socket as WebSocket & { _socket?: { remoteAddress?: string } }
     )._socket?.remoteAddress;
-    const canvasHostPortForWs =
-      canvasHostServer?.port ?? (canvasHost ? port : undefined);
-    const canvasHostOverride =
-      bridgeHost && bridgeHost !== "0.0.0.0" && bridgeHost !== "::"
-        ? bridgeHost
-        : undefined;
-    const canvasHostUrl = resolveCanvasHostUrl({
-      canvasPort: canvasHostPortForWs,
-      hostOverride: canvasHostServer ? canvasHostOverride : undefined,
-      requestHost: upgradeReq.headers.host,
-      forwardedProto: upgradeReq.headers["x-forwarded-proto"],
-      localAddress: upgradeReq.socket?.localAddress,
-    });
     logWs("in", "open", { connId, remoteAddr });
     const isWebchatConnect = (params: ConnectParams | null | undefined) =>
       params?.client?.mode === "webchat" ||
@@ -4267,7 +4052,6 @@ export async function startGatewayServer(
             },
             features: { methods: METHODS, events: EVENTS },
             snapshot,
-            canvasHostUrl,
             policy: {
               maxPayload: MAX_PAYLOAD_BYTES,
               maxBufferedBytes: MAX_BUFFERED_BYTES,
@@ -4497,17 +4281,6 @@ export async function startGatewayServer(
                 signalLastProbeAt = Date.now();
               }
 
-              const imessageCfg = cfg.imessage;
-              const imessageEnabled = imessageCfg?.enabled !== false;
-              const imessageConfigured =
-                Boolean(imessageCfg) && imessageEnabled;
-              let imessageProbe: IMessageProbe | undefined;
-              let imessageLastProbeAt: number | null = null;
-              if (probe && imessageConfigured) {
-                imessageProbe = await probeIMessage(timeoutMs);
-                imessageLastProbeAt = Date.now();
-              }
-
               const linked = await webAuthExists();
               const authAgeMs = getWebAuthAgeMs();
               const self = readWebSelfId();
@@ -4560,17 +4333,6 @@ export async function startGatewayServer(
                     lastError: signalRuntime.lastError ?? null,
                     probe: signalProbe,
                     lastProbeAt: signalLastProbeAt,
-                  },
-                  imessage: {
-                    configured: imessageConfigured,
-                    running: imessageRuntime.running,
-                    lastStartAt: imessageRuntime.lastStartAt ?? null,
-                    lastStopAt: imessageRuntime.lastStopAt ?? null,
-                    lastError: imessageRuntime.lastError ?? null,
-                    cliPath: imessageRuntime.cliPath ?? null,
-                    dbPath: imessageRuntime.dbPath ?? null,
-                    probe: imessageProbe,
-                    lastProbeAt: imessageLastProbeAt,
                   },
                 },
                 undefined,
@@ -6425,9 +6187,7 @@ export async function startGatewayServer(
               }
               const to = params.to.trim();
               const message = params.message.trim();
-              const providerRaw = (params.provider ?? "whatsapp").toLowerCase();
-              const provider =
-                providerRaw === "imsg" ? "imessage" : providerRaw;
+              const provider = (params.provider ?? "whatsapp").toLowerCase();
               try {
                 if (provider === "telegram") {
                   const cfg = loadConfig();
@@ -6476,27 +6236,6 @@ export async function startGatewayServer(
                     mediaUrl: params.mediaUrl,
                     baseUrl,
                     account: cfg.signal?.account,
-                  });
-                  const payload = {
-                    runId: idem,
-                    messageId: result.messageId,
-                    provider,
-                  };
-                  dedupe.set(`send:${idem}`, {
-                    ts: Date.now(),
-                    ok: true,
-                    payload,
-                  });
-                  respond(true, payload, undefined, { provider });
-                } else if (provider === "imessage") {
-                  const cfg = loadConfig();
-                  const result = await sendMessageIMessage(to, message, {
-                    mediaUrl: params.mediaUrl,
-                    cliPath: cfg.imessage?.cliPath,
-                    dbPath: cfg.imessage?.dbPath,
-                    maxBytes: cfg.imessage?.mediaMaxMb
-                      ? cfg.imessage.mediaMaxMb * 1024 * 1024
-                      : undefined,
                   });
                   const payload = {
                     runId: idem,
@@ -6626,10 +6365,7 @@ export async function startGatewayServer(
               const requestedChannelNormalized = requestedChannelRaw
                 ? requestedChannelRaw.toLowerCase()
                 : "last";
-              const requestedChannel =
-                requestedChannelNormalized === "imsg"
-                  ? "imessage"
-                  : requestedChannelNormalized;
+              const requestedChannel = requestedChannelNormalized;
 
               const lastChannel = sessionEntry?.lastChannel;
               const lastTo =
@@ -6650,7 +6386,6 @@ export async function startGatewayServer(
                   requestedChannel === "telegram" ||
                   requestedChannel === "discord" ||
                   requestedChannel === "signal" ||
-                  requestedChannel === "imessage" ||
                   requestedChannel === "webchat"
                 ) {
                   return requestedChannel;
@@ -6670,8 +6405,7 @@ export async function startGatewayServer(
                   resolvedChannel === "whatsapp" ||
                   resolvedChannel === "telegram" ||
                   resolvedChannel === "discord" ||
-                  resolvedChannel === "signal" ||
-                  resolvedChannel === "imessage"
+                  resolvedChannel === "signal"
                 ) {
                   return lastTo || undefined;
                 }
@@ -6910,20 +6644,6 @@ export async function startGatewayServer(
       if (tailscaleCleanup) {
         await tailscaleCleanup();
       }
-      if (canvasHost) {
-        try {
-          await canvasHost.close();
-        } catch {
-          /* ignore */
-        }
-      }
-      if (canvasHostServer) {
-        try {
-          await canvasHostServer.close();
-        } catch {
-          /* ignore */
-        }
-      }
       if (bridge) {
         try {
           await bridge.close();
@@ -6935,7 +6655,6 @@ export async function startGatewayServer(
       await stopTelegramProvider();
       await stopDiscordProvider();
       await stopSignalProvider();
-      await stopIMessageProvider();
       await stopGmailWatcher();
       cron.stop();
       heartbeatRunner.stop();
@@ -6974,7 +6693,7 @@ export async function startGatewayServer(
         await stopBrowserControlServerIfStarted().catch(() => {});
       }
       await Promise.allSettled(
-        [whatsappTask, telegramTask, signalTask, imessageTask].filter(
+        [whatsappTask, telegramTask, signalTask].filter(
           Boolean,
         ) as Array<Promise<unknown>>,
       );

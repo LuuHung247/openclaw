@@ -19,8 +19,7 @@ export type CronPayload =
         | "whatsapp"
         | "telegram"
         | "discord"
-        | "signal"
-        | "imessage";
+        | "signal";
       to?: string;
       bestEffortDeliver?: boolean;
     };
