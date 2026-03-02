@@ -231,7 +231,8 @@ function chatPage() {
           break;
         case '/new':
           if (self.currentAgent) {
-            OpenFangAPI.post('/api/agents/' + self.currentAgent.id + '/session/reset', {}).then(function() {
+            // Gateway openclaw: use sessions.reset via the REST shim path
+            OpenFangAPI.post('/api/sessions/' + self.currentAgent.id + '/reset', {}).then(function() {
               self.messages = [];
               OpenFangToast.success('Session reset');
             }).catch(function(e) { OpenFangToast.error('Reset failed: ' + e.message); });
@@ -240,8 +241,9 @@ function chatPage() {
         case '/compact':
           if (self.currentAgent) {
             self.messages.push({ id: ++msgId, role: 'system', text: 'Compacting session...', meta: '', tools: [] });
-            OpenFangAPI.post('/api/agents/' + self.currentAgent.id + '/session/compact', {}).then(function(res) {
-              self.messages.push({ id: ++msgId, role: 'system', text: res.message || 'Compaction complete', meta: '', tools: [] });
+            // Gateway openclaw: use sessions.compact via the REST shim path
+            OpenFangAPI.post('/api/sessions/' + self.currentAgent.id + '/compact', {}).then(function(res) {
+              self.messages.push({ id: ++msgId, role: 'system', text: (res && res.message) || 'Compaction complete', meta: '', tools: [] });
               self.scrollToBottom();
             }).catch(function(e) { OpenFangToast.error('Compaction failed: ' + e.message); });
           }

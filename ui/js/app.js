@@ -87,9 +87,9 @@ function toolIcon(toolName) {
 
 // Alpine.js global store — OpenClaw DevOps Edition
 document.addEventListener('alpine:init', function() {
-  // Gateway token (optional — only if CLAWDIS_GATEWAY_TOKEN is set)
-  var savedToken = localStorage.getItem('openclaw-gateway-token');
-  if (savedToken) OpenFangAPI.setAuthToken(savedToken);
+  // NOTE: Token and password are already read from URL params and localStorage
+  // by api.js IIFE before Alpine initializes. No need to re-read here.
+  // api.js reads: ?token=, ?password=, localStorage 'openclaw-gateway-token', 'openclaw-gateway-password'
 
   Alpine.store('app', {
     agents: [],
@@ -133,18 +133,32 @@ document.addEventListener('alpine:init', function() {
       }
     },
 
-    // Gateway token prompt — only if gateway rejects connection
+    // Gateway auth prompt — used when gateway rejects connection
+    // key can be a token (long hex) or a password (short string)
     submitApiKey(key) {
       if (!key || !key.trim()) return;
-      OpenFangAPI.setAuthToken(key.trim());
-      localStorage.setItem('openclaw-gateway-token', key.trim());
+      var cred = key.trim();
+      // Heuristic: if it looks like a hex token (>=32 chars, hex only) use as token
+      // Otherwise treat as password
+      if (/^[0-9a-f]{32,}$/i.test(cred)) {
+        OpenFangAPI.setAuthToken(cred);
+        localStorage.setItem('openclaw-gateway-token', cred);
+        OpenFangAPI.setPassword('');
+      } else {
+        OpenFangAPI.setPassword(cred);
+        OpenFangAPI.setAuthToken('');
+        localStorage.removeItem('openclaw-gateway-token');
+      }
       this.showAuthPrompt = false;
+      // Reset reconnect counter before retrying
       OpenFangAPI.connect();
     },
 
     clearApiKey() {
       OpenFangAPI.setAuthToken('');
+      OpenFangAPI.setPassword('');
       localStorage.removeItem('openclaw-gateway-token');
+      localStorage.removeItem('openclaw-gateway-password');
     }
   });
 
@@ -154,8 +168,13 @@ document.addEventListener('alpine:init', function() {
     store.connectionState = state;
     store.connected = (state === 'connected');
     store.wsConnected = OpenFangAPI.isWsConnected();
+    // Auto-show auth prompt when gateway rejects connection (missing/wrong creds)
+    if (state === 'unauthorized') {
+      store.showAuthPrompt = true;
+    }
   });
 });
+
 
 // Main app component
 function app() {

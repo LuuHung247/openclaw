@@ -2929,16 +2929,16 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                     <span class="badge" :class="providerAuthClass(p)" x-text="providerAuthText(p)"></span>
                   </div>
                   <div class="card-meta" x-text="(p.model_count || 0) + ' model(s) available'"></div>
-                  <div class="text-xs text-dim mt-2" x-show="p.api_key_env" x-text="'Env: ' + p.api_key_env"></div>
+                  <div class="text-xs text-dim mt-2" x-show="p.env_var" x-text="'Env: ' + p.env_var"></div>
                   <!-- Key input for unconfigured providers -->
-                  <template x-if="p.auth_status !== 'configured' && p.api_key_env">
+                  <template x-if="p.auth_status !== 'configured' && p.env_var">
                     <div class="key-input-group">
-                      <input type="password" :placeholder="'Enter ' + p.api_key_env" x-model="providerKeyInputs[p.id]">
+                      <input type="password" :placeholder="'Enter ' + p.env_var" x-model="providerKeyInputs[p.id]">
                       <button class="btn btn-primary btn-sm" @click="saveProviderKey(p)">Save</button>
                     </div>
                   </template>
-                  <template x-if="p.auth_status !== 'configured' && p.api_key_env">
-                    <div class="text-xs text-dim mt-2">Or set <code style="color:var(--accent-light);background:var(--bg);padding:1px 4px;border-radius:2px" x-text="p.api_key_env"></code> in your environment and restart</div>
+                  <template x-if="p.auth_status !== 'configured' && p.env_var">
+                    <div class="text-xs text-dim mt-2">Or set <code style="color:var(--accent-light);background:var(--bg);padding:1px 4px;border-radius:2px" x-text="p.env_var"></code> in your environment and restart</div>
                   </template>
                   <!-- Copilot OAuth button -->
                   <template x-if="p.id === 'github-copilot' && p.auth_status !== 'configured'">
@@ -2966,7 +2966,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                     </div>
                   </template>
                   <!-- No key needed -->
-                  <template x-if="!p.api_key_env || p.key_required === false">
+                  <template x-if="!p.env_var || p.no_key_needed">
                     <div class="text-xs mt-2" style="color:var(--success)" x-show="p.auth_status !== 'configured' && p.auth_status !== 'not_set' && p.auth_status !== 'missing'">No API key needed &mdash; runs locally or is free</div>
                   </template>
                   <!-- Base URL editor for local providers -->

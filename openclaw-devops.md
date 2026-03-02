@@ -279,3 +279,132 @@ docker compose exec clawdis-gateway bash
 # Logs realtime
 docker compose logs -f clawdis-gateway
 ```
+
+---
+
+## 6. Phân tích Lỗi Migrate (UI từ openfang → openclaw)
+
+> **Ngày:** 2026-03-02  
+> **Tình trạng:** ✅ Fixed  
+> **Root cause:** openfang là Rust REST API backend, openclaw là Node.js WebSocket gateway — API contract hoàn toàn khác nhau. UI copy từ openfang nhưng `api.js` phải bridge sang WebSocket protocol của openclaw.
+
+---
+
+### Bug #1 — `getAgents()` thiếu field `state` (CRITICAL)
+
+**File:** `ui/js/api.js` — function `getAgents()`  
+**Ảnh hưởng:** Toàn bộ Agents page crash/blank vì `agent.state` = undefined  
+**Root cause:** openfang trả về `state: "Running"|"Idle"`, nhưng openclaw `getAgents()` chỉ map `status: "idle"|"error"` và thiếu `model_provider`, `model_name`, `identity`
+
+**Fix:**
+```js
+// Trước (broken)
+return { id, name, status: ..., provider: ... };
+
+// Sau (fixed)
+var state = s.running ? 'Running' : (s.abortedLastRun ? 'Error' : 'Idle');
+return { id, name, state, status, model_provider, model_name, identity: {} };
+```
+
+---
+
+### Bug #2 — `saveProviderKey()` override toàn bộ providers config (HIGH)
+
+**File:** `ui/js/api.js` — POST `/api/providers/{id}/key`  
+**Ảnh hưởng:** Save key provider A xóa keys của providers B, C, D  
+**Root cause:** `config.set` với `{ providers: { anthropic: { apiKey: '...' } } }` override toàn bộ providers object thay vì merge
+
+**Fix:**
+```js
+// Trước (broken)
+request('config.set', { patch: { providers: { [provId]: { apiKey } } } })
+
+// Sau (fixed) — nested path để gateway biết là partial update
+request('config.set', { patch: { models: { providers: { [provId]: { apiKey } } } } })
+```
+
+---
+
+### Bug #3 — `removeProviderKey()` set empty string thay vì null (MEDIUM)
+
+**File:** `ui/js/api.js` — DEL `/api/providers/{id}/key`  
+**Ảnh hưởng:** Provider vẫn hiển thị "configured" sau khi xóa key  
+**Fix:** Set `apiKey: null` thay vì `apiKey: ''`
+
+---
+
+### Bug #4 — `getChannels()` không hiển thị Telegram khi chưa config (MEDIUM)
+
+**File:** `ui/js/api.js` — function `getChannels()`  
+**Ảnh hưởng:** Channels page trống hoàn toàn → user không biết cách configure Telegram  
+**Root cause:** Chỉ push Telegram vào list khi `p.telegram` đã tồn tại (tức là đã configured)
+
+**Fix:** Luôn trả về Telegram channel với `configured: false` nếu chưa setup. Detect qua nhiều field names (`tg.configured || tg.token || tg.botToken || tg.bot_token`)
+
+---
+
+### Bug #5 — `channels.js` gọi `OpenFangAPI.delete()` không tồn tại (HIGH)
+
+**File:** `ui/js/pages/channels.js` line 255  
+**Ảnh hưởng:** Click Remove channel → JavaScript runtime error  
+**Root cause:** openfang api dùng `.delete()`, openclaw api chỉ export `.del()`
+
+**Fix:** Thay `OpenFangAPI.delete(...)` → `OpenFangAPI.del(...)`
+
+---
+
+### Bug #6 — `/api/migrate/detect` endpoint không tồn tại → Settings crash (MEDIUM)
+
+**File:** `ui/js/api.js` — GET shim  
+**Ảnh hưởng:** Khi user click tab "Migration" trong Settings, page crash vì request unmapped  
+**Fix:** Thêm handler trả về `{ detected: false }` gracefully
+
+---
+
+### Bug #7 — `/new` và `/compact` slash commands gọi sai endpoint (MEDIUM)
+
+**File:** `ui/js/pages/chat.js`  
+**Ảnh hưởng:** `/new` và `/compact` trong chat box không hoạt động  
+**Root cause:** Chat.js dùng openfang REST path `/api/agents/{id}/session/reset` nhưng openclaw api shim chỉ handle `/api/sessions/{key}/reset`
+
+**Fix:**
+```js
+// Trước (openfang path)
+OpenFangAPI.post('/api/agents/' + id + '/session/reset', {})
+// Sau (openclaw shim path)
+OpenFangAPI.post('/api/sessions/' + id + '/reset', {})
+```
+
+---
+
+### Bug #8 — `testProvider()` không pass provider ID (LOW)
+
+**File:** `ui/js/api.js` — POST `/api/providers/{id}/test`  
+**Ảnh hưởng:** Test button luôn test toàn bộ thay vì provider cụ thể  
+**Fix:** Truyền `provider: provId` vào `providers.status` request
+
+---
+
+### Tổng kết các file đã sửa
+
+| File | Lỗi đã fix |
+|------|-----------|
+| `ui/js/api.js` | Bug #1 getAgents state, #2 saveProviderKey merge, #3 removeProviderKey null, #4 getChannels always show, #6 migrate endpoints, #8 testProvider ID |
+| `ui/js/pages/channels.js` | Bug #5 `.delete()` → `.del()` |
+| `ui/js/pages/chat.js` | Bug #7 `/new` `/compact` correct endpoint paths |
+
+---
+
+### Sự khác biệt kiến trúc openfang vs openclaw (để tránh lỗi tương lai)
+
+| Aspect | openfang (Rust) | openclaw (Node.js) |
+|--------|----------------|-------------------|
+| Protocol | REST HTTP API | WebSocket JSON-RPC |
+| Agent concept | `agent_id` UUID | `sessionKey` string |
+| Agent fields | `state: "Running"` | map từ `running` bool |
+| model split | `model_provider` + `model_name` | `model: "provider/name"` string |
+| Provider config | REST PUT `/api/providers/{id}/key` | WS `config.set` nested patch |
+| Session reset | `/api/agents/{id}/session/reset` | `/api/sessions/{key}/reset` shim |
+| Channels | Multi-channel (Telegram, Discord, Slack...) | Telegram only |
+| Migration | Native support | Không support (openclaw là target) |
+| Identity | `agent.identity.emoji` from DB | `session.identity` từ config |

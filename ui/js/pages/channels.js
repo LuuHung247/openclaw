@@ -252,7 +252,7 @@ function channelsPage() {
       var self = this;
       OpenFangToast.confirm('Remove Channel', 'Remove ' + displayName + ' configuration? This will deactivate the channel.', async function() {
         try {
-          await OpenFangAPI.delete('/api/channels/' + name + '/configure');
+          await OpenFangAPI.del('/api/channels/' + name + '/configure');
           OpenFangToast.success(displayName + ' removed and deactivated.');
           await self.refreshStatus();
           self.setupModal = null;

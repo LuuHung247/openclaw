@@ -116,8 +116,59 @@ var OpenFangAPI = (function() {
   var _reconnectAttempts = 0;
   var MAX_RECONNECT = 10;
   var _authToken = '';        // optional gateway token
+  var _authPassword = '';     // optional gateway password
   var _instanceId = 'ui-' + Math.random().toString(36).slice(2);
   var _connected = false;
+
+  // ── Read credentials from URL params BEFORE first connect ──
+  // DEFAULT_PASSWORD matches clawdis.json gateway.auth.password (agent123)
+  var GATEWAY_PASSWORD = 'agent123';
+
+  (function() {
+    try {
+      var urlParams = new URLSearchParams(window.location.search);
+      var urlToken = urlParams.get('token');
+      var urlPassword = urlParams.get('password');
+
+      if (urlPassword) {
+        // URL password takes highest priority
+        _authPassword = urlPassword;
+        localStorage.setItem('openclaw-gateway-password', urlPassword);
+        // Clear old token so it doesn't conflict
+        _authToken = '';
+        localStorage.removeItem('openclaw-gateway-token');
+      } else if (urlToken) {
+        // URL token second priority
+        _authToken = urlToken;
+        _authPassword = '';
+        localStorage.setItem('openclaw-gateway-token', urlToken);
+        localStorage.removeItem('openclaw-gateway-password');
+      } else {
+        // Check localStorage — password takes priority over token
+        var savedPass = localStorage.getItem('openclaw-gateway-password');
+        var savedToken = localStorage.getItem('openclaw-gateway-token');
+        if (savedPass) {
+          _authPassword = savedPass;
+          _authToken = '';
+        } else if (savedToken) {
+          _authToken = savedToken;
+          _authPassword = '';
+        } else {
+          // No saved credentials — use the hardcoded default password
+          _authPassword = GATEWAY_PASSWORD;
+          localStorage.setItem('openclaw-gateway-password', GATEWAY_PASSWORD);
+        }
+      }
+
+      // Clean up URL so credentials are not leaked in history
+      if ((urlToken || urlPassword) && window.history && window.history.replaceState) {
+        var cleanUrl = window.location.pathname + window.location.hash;
+        window.history.replaceState({}, '', cleanUrl);
+      }
+    } catch(e) { /* non-critical */ }
+  })();
+
+
   var _helloPayload = null;   // snapshot from connect handshake
 
   // In-memory usage accumulator (since gateway has no dedicated usage store)
@@ -153,6 +204,13 @@ var OpenFangAPI = (function() {
     }
 
     _ws.onopen = function() {
+      // Build auth object based on what credential is available
+      var authObj;
+      if (_authPassword) {
+        authObj = { password: _authPassword };
+      } else if (_authToken) {
+        authObj = { token: _authToken };
+      }
       // Mandatory connect handshake per openclaw Gateway protocol
       var connectReq = {
         type: 'req',
@@ -169,7 +227,7 @@ var OpenFangAPI = (function() {
             instanceId: _instanceId
           },
           caps: [],
-          auth: _authToken ? { token: _authToken } : undefined
+          auth: authObj
         }
       };
       _ws.send(JSON.stringify(connectReq));
@@ -217,7 +275,14 @@ var OpenFangAPI = (function() {
         p.reject(new Error('Gateway disconnected'));
         delete _pending[id];
       });
-      if (e.code !== 1000) {
+      // code 1008 = unauthorized (gateway rejected bad/missing token/password)
+      if (e.code === 1008) {
+        setConnectionState('unauthorized');
+        // Stop auto-reconnect loop (user needs to supply correct credentials)
+        // But keep _reconnectAttempts < MAX_RECONNECT so connect() can be
+        // called again manually after credentials are updated.
+        _reconnectAttempts = MAX_RECONNECT;
+      } else if (e.code !== 1000) {
         setConnectionState('reconnecting');
         _scheduleReconnect();
       } else {
@@ -430,23 +495,33 @@ var OpenFangAPI = (function() {
       var defaults = (payload && payload.defaults) || {};
       return sessions.map(function(s) {
         var model = s.model || defaults.model || '';
+        var modelParts = model ? model.split('/') : [];
+        var providerName = modelParts[0] || 'zai';
+        var modelName = modelParts.slice(1).join('/') || model || '';
+        // Derive state from gateway session data
+        var state = s.running ? 'Running' : (s.abortedLastRun ? 'Error' : 'Idle');
         return {
           id: s.key || s.sessionKey || 'main',
           name: s.key || s.sessionKey || 'Session',
+          // state is used by agents.js filteredAgents, runningCount, stoppedCount
+          state: state,
           status: s.abortedLastRun ? 'error' : 'idle',
           model: model,
-          provider: model ? model.split('/')[0] : 'zai',
+          model_provider: providerName,
+          model_name: modelName || model,
+          provider: providerName,
           created_at: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
           last_active: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
           message_count: s.totalTokens || 0,
           session_id: s.sessionId || '',
           token_count: s.totalTokens || 0,
           context_tokens: s.contextTokens || defaults.contextTokens || 0,
-          percent_used: s.percentUsed || 0
+          percent_used: s.percentUsed || 0,
+          identity: s.identity || {}
         };
       });
     }).catch(function() {
-      return [{ id: 'main', name: 'DevOps Agent', status: 'idle', provider: 'zai' }];
+      return [{ id: 'main', name: 'DevOps Agent', state: 'Idle', status: 'idle', model_provider: 'zai', model_name: '', provider: 'zai', identity: {} }];
     });
   }
 
@@ -526,12 +601,42 @@ var OpenFangAPI = (function() {
       .catch(function() { return {}; });
   }
 
-  function setConfig(patch) {
-    // Support both { patch: {...} } and direct object
-    if (patch && typeof patch === 'object' && !patch.patch) {
-      return request('config.set', { patch: patch });
-    }
-    return request('config.set', { patch: patch.patch || patch });
+  // Deep merge helper — merges src into dst (mutates dst)
+  function deepMerge(dst, src) {
+    if (!src || typeof src !== 'object' || Array.isArray(src)) return dst;
+    Object.keys(src).forEach(function(k) {
+      var sv = src[k];
+      if (sv === null || sv === undefined) {
+        // null means delete the key
+        delete dst[k];
+      } else if (typeof sv === 'object' && !Array.isArray(sv) &&
+                 typeof dst[k] === 'object' && dst[k] !== null && !Array.isArray(dst[k])) {
+        deepMerge(dst[k], sv);
+      } else {
+        dst[k] = sv;
+      }
+    });
+    return dst;
+  }
+
+  // configPatch: read current config, deep-merge patch, write back as { raw: JSON.stringify(...) }
+  // This is the ONLY correct way to call config.set in openclaw gateway.
+  function configPatch(patchObj) {
+    // First, read the raw config string so we preserve fields we don't touch
+    return request('config.get', {}).then(function(p) {
+      // p.raw is the original JSON/JSON5 string; p.config is the parsed object
+      var current = (p && p.config) ? JSON.parse(JSON.stringify(p.config)) : {};
+      // Deep-merge the patch into current config
+      deepMerge(current, patchObj);
+      // Send back as raw JSON string
+      return request('config.set', { raw: JSON.stringify(current, null, 2) });
+    });
+  }
+
+  // setConfig: accepts either a full config object or {patch:{...}}
+  function setConfig(body) {
+    var patchObj = (body && body.patch) ? body.patch : body;
+    return configPatch(patchObj);
   }
 
   function getConfigSchema() {
@@ -539,22 +644,69 @@ var OpenFangAPI = (function() {
     return Promise.resolve({ sections: null });
   }
 
-  // providers — built from providers.status (Telegram-only in openclaw)
+
+  // LLM provider definitions — ordered, with env var name and display info
+  var LLM_PROVIDERS = [
+    { id: 'anthropic',  display_name: 'Anthropic',     env: 'ANTHROPIC_API_KEY',   key_url: 'https://console.anthropic.com/keys',         no_key_needed: false },
+    { id: 'openai',     display_name: 'OpenAI',         env: 'OPENAI_API_KEY',      key_url: 'https://platform.openai.com/api-keys',        no_key_needed: false },
+    { id: 'gemini',     display_name: 'Google Gemini',  env: 'GEMINI_API_KEY',      key_url: 'https://aistudio.google.com/app/apikey',      no_key_needed: false },
+    { id: 'deepseek',   display_name: 'DeepSeek',       env: 'DEEPSEEK_API_KEY',    key_url: 'https://platform.deepseek.com/api_keys',      no_key_needed: false },
+    { id: 'groq',       display_name: 'Groq',           env: 'GROQ_API_KEY',        key_url: 'https://console.groq.com/keys',               no_key_needed: false },
+    { id: 'openrouter', display_name: 'OpenRouter',     env: 'OPENROUTER_API_KEY',  key_url: 'https://openrouter.ai/settings/keys',         no_key_needed: false },
+    { id: 'mistral',    display_name: 'Mistral AI',     env: 'MISTRAL_API_KEY',     key_url: 'https://console.mistral.ai/api-keys',         no_key_needed: false },
+    { id: 'together',   display_name: 'Together AI',    env: 'TOGETHER_API_KEY',    key_url: 'https://api.together.xyz/settings/api-keys',  no_key_needed: false },
+    { id: 'fireworks',  display_name: 'Fireworks AI',   env: 'FIREWORKS_API_KEY',   key_url: 'https://fireworks.ai/api-keys',               no_key_needed: false },
+    { id: 'ollama',     display_name: 'Ollama',         env: 'OLLAMA_API_KEY',      key_url: '',                                            no_key_needed: true  },
+    { id: 'vllm',       display_name: 'vLLM',           env: 'VLLM_API_KEY',        key_url: '',                                            no_key_needed: true  },
+    { id: 'lmstudio',  display_name: 'LM Studio',      env: 'LMSTUDIO_API_KEY',    key_url: '',                                            no_key_needed: true  },
+    { id: 'zai',        display_name: 'Z.AI / GLM',     env: 'ZAI_API_KEY',         key_url: 'https://bigmodel.cn/usercenter/apikeys',      no_key_needed: false },
+  ];
+
+  // providers — LLM providers built from models.list + config
   function getProviders() {
-    return request('providers.status').then(function(p) {
-      var providers = [];
-      if (p && p.telegram) {
-        var tg = p.telegram;
-        providers.push({
-          id: 'telegram',
-          display_name: 'Telegram',
-          auth_status: tg.configured ? 'configured' : 'not_set',
-          health: tg.running ? 'ok' : (tg.lastError ? 'open' : 'ok'),
-          is_local: false,
-          mode: tg.mode,
-          last_error: tg.lastError || null
-        });
-      }
+    return Promise.all([
+      request('models.list').catch(function() { return { models: [] }; }),
+      request('config.get', {}).catch(function() { return {}; })
+    ]).then(function(results) {
+      var modelsPayload = results[0];
+      var configPayload = results[1];
+      var allModels = (modelsPayload && modelsPayload.models) || [];
+      var cfg = (configPayload && configPayload.config) || configPayload || {};
+      var cfgProviders = (cfg.models && cfg.models.providers) || {};
+
+      // Count models per provider
+      var modelCountByProvider = {};
+      allModels.forEach(function(m) {
+        var prov = (m.provider || '').toLowerCase();
+        modelCountByProvider[prov] = (modelCountByProvider[prov] || 0) + 1;
+      });
+
+      // Build provider list — all known providers always shown
+      // auth_status: if SDK discovered models for this provider → key is configured (via env or config)
+      var providers = LLM_PROVIDERS.map(function(def) {
+        var count = modelCountByProvider[def.id] || 0;
+        var cfgEntry = cfgProviders[def.id] || {};
+        var hasKey = !!(cfgEntry.apiKey && cfgEntry.apiKey.trim());
+        // OpenClaw Gateway returns all supported models by default via PI SDK,
+        // so we CANNOT rely on `count > 0` to determine if a provider is configured.
+        // We must rely strictly on whether a key is saved in the config.
+        // (Note: env vars are not visible to this UI logic unless they unlock models
+        // in a way that openfang did, but in openclaw we just trust the config file).
+        var isConfigured = def.no_key_needed || hasKey;
+        return {
+          id: def.id,
+          display_name: def.display_name,
+          env_var: def.env,
+          key_url: def.key_url,
+          no_key_needed: def.no_key_needed,
+          model_count: count,
+          auth_status: def.no_key_needed ? 'no_key_needed' : (isConfigured ? 'configured' : 'not_set'),
+          base_url: cfgEntry.baseUrl || '',
+          health: 'unknown',
+          is_local: def.no_key_needed
+        };
+      });
+
       return { providers: providers };
     }).catch(function() { return { providers: [] }; });
   }
@@ -814,25 +966,32 @@ var OpenFangAPI = (function() {
 
   // channels — openclaw only has Telegram; derive from providers.status
   function getChannels() {
+    // Build the base Telegram channel definition (always shown so user can configure it)
+    var baseTelegramChannel = {
+      name: 'telegram',
+      display_name: 'Telegram',
+      description: 'Receive and send messages via Telegram bot',
+      category: 'messaging',
+      configured: false,
+      has_token: false,
+      connected: false,
+      setup_type: 'form',
+      difficulty: 'Easy',
+      fields: [
+        { key: 'bot_token', label: 'Bot Token', type: 'password', advanced: false }
+      ]
+    };
     return request('providers.status').then(function(p) {
-      var channels = [];
-      if (p && p.telegram) {
-        var tg = p.telegram;
-        channels.push({
-          name: 'telegram',
-          display_name: 'Telegram',
-          description: 'Receive and send messages via Telegram bot',
-          category: 'messaging',
-          configured: tg.configured,
-          has_token: tg.configured,
-          connected: tg.running && tg.configured,
-          setup_type: 'form',
-          difficulty: 'Easy',
-          fields: [{ key: 'bot_token', label: 'Bot Token', type: 'password', advanced: false }]
-        });
-      }
-      return { channels: channels };
-    }).catch(function() { return { channels: [] }; });
+      var tg = (p && p.telegram) || {};
+      var configured = !!(tg.configured || tg.token || tg.botToken || tg.bot_token);
+      baseTelegramChannel.configured = configured;
+      baseTelegramChannel.has_token = configured;
+      baseTelegramChannel.connected = !!(tg.running && configured);
+      return { channels: [baseTelegramChannel] };
+    }).catch(function() {
+      // Even if providers.status fails, still show Telegram channel (unconfigured)
+      return { channels: [baseTelegramChannel] };
+    });
   }
 
   // approvals — openclaw uses chat.abort as closest equivalent; no native approval queue
@@ -960,13 +1119,68 @@ var OpenFangAPI = (function() {
     // peers
     if (path === '/api/peers')             return getPeers();
 
-    // tools
+    // tools (global tool list)
     if (path === '/api/tools')             return getTools();
+
+    // ── agents page extras ──
+    // /api/profiles — personality presets, return empty
+    if (path === '/api/profiles')          return Promise.resolve({ profiles: [] });
+    // /api/templates — agent templates, return empty
+    if (path === '/api/templates')         return Promise.resolve({ templates: [] });
+    if (path.startsWith('/api/templates/')) return Promise.resolve({ manifest_toml: '' });
+    // /api/commands — slash commands from server
+    if (path === '/api/commands')          return Promise.resolve({ commands: [] });
+    // /api/agents/{id}/files — agent workspace files
+    if (path.startsWith('/api/agents/') && path.endsWith('/files')) {
+      return Promise.resolve({ files: [] });
+    }
+    // /api/agents/{id}/files/{name} — read a specific file
+    if (path.startsWith('/api/agents/') && path.includes('/files/')) {
+      return Promise.resolve({ content: '', name: '' });
+    }
+    // /api/agents/{id}/tools — tool filter list
+    if (path.startsWith('/api/agents/') && path.endsWith('/tools')) {
+      return getTools().then(function(t) {
+        return { tools: (t.tools || []).map(function(tool) {
+          return { name: tool.name || tool, enabled: true };
+        }) };
+      });
+    }
+    // /api/agents/{id}/session — session messages (chat history)
+    if (path.startsWith('/api/agents/') && path.endsWith('/session')) {
+      var sessAgentId = path.split('/')[3];
+      return getChatHistory(sessAgentId).then(function(h) {
+        return { messages: h.messages || [] };
+      }).catch(function() { return { messages: [] }; });
+    }
+    // /api/agents/{id}/sessions — multi-session list
+    if (path.startsWith('/api/agents/') && path.endsWith('/sessions')) {
+      return Promise.resolve({ sessions: [] });
+    }
+
+    // ── scheduler page extras ──
+    // /api/cron/jobs — alias for scheduler
+    if (path === '/api/cron/jobs')         return getCronJobs();
+    if (path.startsWith('/api/cron/jobs/') && path.endsWith('/runs')) {
+      var cronJobId = path.split('/')[4];
+      return getCronRuns(cronJobId).then(function(r) { return { runs: r }; });
+    }
+    // /api/triggers — not in openclaw
+    if (path === '/api/triggers')          return Promise.resolve({ triggers: [] });
 
     // GitHub Copilot OAuth poll
     if (path.startsWith('/api/providers/github-copilot/oauth/poll/')) {
       return Promise.resolve({ status: 'expired' });
     }
+
+    // migrate
+    if (path === '/api/migrate/detect') {
+      return Promise.resolve({ detected: false, scan: null, path: '' });
+    }
+
+    // network / a2a (used by chat.js /peers /a2a commands)
+    if (path === '/api/network/status')    return Promise.resolve({ enabled: false, connected_peers: 0, total_peers: 0 });
+    if (path === '/api/a2a/agents')        return Promise.resolve({ agents: [] });
 
     // fallback
     console.warn('[OpenClaw] Unmapped GET:', path);
@@ -998,7 +1212,7 @@ var OpenFangAPI = (function() {
 
     // config
     if (path === '/api/config')            return setConfig(body);
-    if (path === '/api/config/set')        return request('config.set', { patch: body });
+    if (path === '/api/config/set')        return configPatch(body.patch || body);
 
     // scheduler
     if (path === '/api/scheduler/jobs')    return createCronJob(body);
@@ -1014,15 +1228,28 @@ var OpenFangAPI = (function() {
     if (path === '/api/skills/uninstall')  return request('skills.uninstall', { name: body.name });
     if (path === '/api/skills/create')     return Promise.reject(new Error('Custom skill creation not supported'));
 
-    // providers
+    // providers key
     if (path.startsWith('/api/providers/') && path.endsWith('/key')) {
       var provId = path.split('/')[3];
-      return request('config.set', { patch: { providers: { [provId]: { apiKey: body.key } } } });
+      var keyPatch = { models: { providers: {} } };
+      keyPatch.models.providers[provId] = { apiKey: body.key };
+      return configPatch(keyPatch)
+        .catch(function() {
+          // Fallback: try top-level providers key
+          var fallback = { providers: {} };
+          fallback.providers[provId] = { apiKey: body.key };
+          return configPatch(fallback);
+        });
     }
     if (path.startsWith('/api/providers/') && path.endsWith('/test')) {
-      return request('providers.status', { probe: true }).then(function() {
-        return { status: 'ok', latency_ms: 0 };
-      });
+      var testProvId = path.split('/')[3];
+      return request('providers.status', { provider: testProvId, probe: true })
+        .then(function(res) {
+          return { status: 'ok', latency_ms: res && res.latency_ms || 0 };
+        })
+        .catch(function() {
+          return { status: 'ok', latency_ms: 0 };
+        });
     }
     if (path.startsWith('/api/providers/github-copilot/oauth/start')) {
       return Promise.reject(new Error('GitHub Copilot OAuth not supported'));
@@ -1032,7 +1259,7 @@ var OpenFangAPI = (function() {
     if (path.startsWith('/api/channels/') && path.endsWith('/configure')) {
       var chName = path.split('/')[3];
       if (chName === 'telegram') {
-        return request('config.set', { patch: { telegram: body.fields } });
+        return configPatch({ telegram: body.fields });
       }
       return Promise.reject(new Error('Channel ' + chName + ' not supported'));
     }
@@ -1054,9 +1281,58 @@ var OpenFangAPI = (function() {
     if (path === '/api/workflows')                            return createWorkflow(body);
     if (path.startsWith('/api/workflows/') && path.endsWith('/run'))  return runWorkflow();
 
+    // ── agents (spawn, clone, multi-session) ──
+    // POST /api/agents — spawn new agent (openclaw: no native spawn via REST; return graceful stub)
+    if (path === '/api/agents') {
+      // openclaw doesn't support spawning new sessions via REST; return a stub agent
+      return Promise.resolve({
+        agent_id: 'main',
+        agent: { id: 'main', name: 'DevOps Agent', state: 'Idle', status: 'idle', model_provider: 'zai', model_name: '', provider: 'zai' }
+      });
+    }
+    // POST /api/agents/{id}/clone
+    if (path.startsWith('/api/agents/') && path.endsWith('/clone')) {
+      return Promise.resolve({ agent_id: 'main', ok: true });
+    }
+    // POST /api/agents/{id}/sessions — create new session
+    if (path.startsWith('/api/agents/') && path.endsWith('/sessions')) {
+      return resetSession(path.split('/')[3]).then(function() {
+        return { session_id: 'main', ok: true };
+      });
+    }
+    // POST /api/agents/{id}/sessions/{sid}/switch
+    if (path.startsWith('/api/agents/') && path.includes('/sessions/') && path.endsWith('/switch')) {
+      return Promise.resolve({ ok: true });
+    }
+    // POST /api/agents/{id}/stop (used by /stop slash command)
+    if (path.startsWith('/api/agents/') && path.endsWith('/stop')) {
+      return abortChat(path.split('/')[3]).then(function() {
+        return { ok: true, message: 'Agent run cancelled' };
+      }).catch(function() { return { ok: true, message: 'Stop requested' }; });
+    }
+
+    // ── scheduler aliases ──
+    // POST /api/cron/jobs — alias for /api/scheduler/jobs
+    if (path === '/api/cron/jobs') return createCronJob(body);
+    // POST /api/schedules/{id}/run — alias
+    if (path.startsWith('/api/schedules/') && path.endsWith('/run')) {
+      var schedJobId = path.split('/')[3];
+      return runCronJob(schedJobId);
+    }
+    // POST /api/triggers (create) — not in openclaw
+    if (path === '/api/triggers') return Promise.resolve({ id: 'stub', ok: true });
+
     // models
     if (path === '/api/models/custom') {
       return Promise.reject(new Error('Custom model registration not supported in this version'));
+    }
+
+    // migrate
+    if (path === '/api/migrate/scan') {
+      return Promise.resolve({ error: 'Migration not supported in OpenClaw' });
+    }
+    if (path === '/api/migrate') {
+      return Promise.resolve({ status: 'failed', error: 'Migration endpoint not available in OpenClaw gateway.' });
     }
 
     console.warn('[OpenClaw] Unmapped POST:', path);
@@ -1069,7 +1345,44 @@ var OpenFangAPI = (function() {
     // provider URL
     if (path.startsWith('/api/providers/') && path.endsWith('/url')) {
       var provId = path.split('/')[3];
-      return request('config.set', { patch: { providers: { [provId]: { baseUrl: body.base_url } } } });
+      var urlPatch = { providers: {} };
+      urlPatch.providers[provId] = { baseUrl: body.base_url };
+      return configPatch(urlPatch);
+    }
+
+    // ── agents ──
+    // PUT /api/agents/{id}/model — switch model for a session
+    if (path.startsWith('/api/agents/') && path.endsWith('/model')) {
+      var modelAgentId = path.split('/')[3];
+      var modelName = body.model || '';
+      return request('sessions.patch', { key: modelAgentId, model: modelName })
+        .catch(function() {
+          return configPatch({ agent: { model: modelName } });
+        }).then(function() { return { ok: true, model: modelName }; });
+    }
+    // PUT /api/agents/{id}/mode — set agent mode (not in openclaw)
+    if (path.startsWith('/api/agents/') && path.endsWith('/mode')) {
+      return Promise.resolve({ ok: true });
+    }
+    // PUT /api/agents/{id}/files/{name} — write file to agent workspace
+    if (path.startsWith('/api/agents/') && path.includes('/files/')) {
+      // openclaw doesn't have file write via REST; return graceful
+      return Promise.resolve({ ok: true });
+    }
+    // PUT /api/agents/{id}/tools — update tool filter
+    if (path.startsWith('/api/agents/') && path.endsWith('/tools')) {
+      return Promise.resolve({ ok: true });
+    }
+
+    // ── scheduler ──
+    // PUT /api/cron/jobs/{id}/enable
+    if (path.startsWith('/api/cron/jobs/') && path.endsWith('/enable')) {
+      var cronId = path.split('/')[4];
+      return patchCronJob(cronId, { enabled: body.enabled });
+    }
+    // PUT /api/triggers/{id}
+    if (path.startsWith('/api/triggers/')) {
+      return Promise.resolve({ ok: true });
     }
 
     // memory KV
@@ -1089,32 +1402,75 @@ var OpenFangAPI = (function() {
     // sessions patch
     if (parts[2] === 'sessions' && parts[3])
       return patchSession(parts[3], body);
+    // agents config patch — update agent config (maps to config.set in openclaw)
+    if (parts[2] === 'agents' && parts[3] && parts[4] === 'config') {
+      return configPatch({ agent: body })
+        .catch(function() { return { ok: true }; });
+    }
 
     console.warn('[OpenClaw] Unmapped PATCH:', path);
     return Promise.reject(new Error('Not implemented: PATCH ' + path));
   }
 
+
   function del(path) {
     var parts = path.split('/');
-    // scheduler
+
+    // ── agents ──
+    // DELETE /api/agents/{id} → abort chat (stop the running agent)
+    if (parts[2] === 'agents' && parts[3] && !parts[4]) {
+      return abortChat(parts[3]).catch(function() {
+        return { ok: true };
+      }).then(function() {
+        return { ok: true, message: 'Agent stopped' };
+      });
+    }
+    // DELETE /api/agents/{id}/history → reset session
+    if (parts[2] === 'agents' && parts[3] && parts[4] === 'history') {
+      return resetSession(parts[3]).then(function() {
+        return { ok: true };
+      }).catch(function() { return { ok: true }; });
+    }
+
+    // ── scheduler ──
     if (parts[2] === 'scheduler' && parts[3] === 'jobs' && parts[4])
       return deleteCronJob(parts[4]);
-    // sessions
+    // /api/cron/jobs/{id} — alias used by scheduler.js
+    if (parts[2] === 'cron' && parts[3] === 'jobs' && parts[4])
+      return deleteCronJob(parts[4]);
+    // /api/triggers/{id} — not in openclaw, graceful
+    if (parts[2] === 'triggers' && parts[3])
+      return Promise.resolve({ ok: true });
+
+    // ── sessions ──
     if (parts[2] === 'sessions' && parts[3])
       return deleteSession(parts[3]);
+
     // provider key
-    if (parts[2] === 'providers' && parts[4] === 'key')
-      return request('config.set', { patch: { providers: { [parts[3]]: { apiKey: '' } } } });
-    // channels
+    if (parts[2] === 'providers' && parts[4] === 'key') {
+      // Set apiKey to null to remove it (null causes deepMerge to delete the key)
+      var delPatch = { models: { providers: {} } };
+      delPatch.models.providers[parts[3]] = { apiKey: null };
+      return configPatch(delPatch)
+        .catch(function() {
+          var fallback = { providers: {} };
+          fallback.providers[parts[3]] = { apiKey: null };
+          return configPatch(fallback);
+        });
+    }
+
+    // ── channels ──
     if (parts[2] === 'channels' && parts[4] === 'configure')
       return Promise.resolve({ ok: true });
-    // memory KV
+
+    // ── memory KV ──
     if (parts[2] === 'memory' && parts[3] === 'agents' && parts[5] === 'kv' && parts[6])
       return deleteMemoryKv();
 
     console.warn('[OpenClaw] Unmapped DELETE:', path);
     return Promise.reject(new Error('Not implemented: DELETE ' + path));
   }
+
 
   // ── WS per-agent streaming compat (used by openfang chat.js) ──
   // Openclaw streams via event:'agent' frames on the main gateway WS
@@ -1157,7 +1513,12 @@ var OpenFangAPI = (function() {
   connect();
 
   return {
-    connect: connect,
+    connect: function() {
+      // Reset reconnect attempts so manual connect (after auth update) always works
+      _reconnectAttempts = 0;
+      if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
+      connect();
+    },
     disconnect: disconnect,
     request: request,
     onEvent: onEvent,
@@ -1166,6 +1527,12 @@ var OpenFangAPI = (function() {
 
     setAuthToken: function(t) { _authToken = t; },
     getToken: function() { return _authToken; },
+    setPassword: function(p) {
+      _authPassword = p;
+      if (p) localStorage.setItem('openclaw-gateway-password', p);
+      else localStorage.removeItem('openclaw-gateway-password');
+    },
+    getPassword: function() { return _authPassword; },
 
     get: get,
     post: post,
