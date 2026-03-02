@@ -98,3 +98,23 @@ Build status: ✅ clean sau khi xóa
 **Scripts đã xóa khỏi package.json:** `ui:install`, `ui:dev`, `ui:build`
 
 Build status: ✅ clean sau khi xóa
+
+### Đã xóa — Skills nhóm 1 (macOS/iOS only)
+
+`apple-notes`, `apple-reminders`, `things-mac`, `peekaboo`, `imsg`, `camsnap`, `sag`, `eightctl`, `openhue`, `blucli`, `sonoscli`, `spotify-player`
+
+### Đã xóa — Skills nhóm 2 (Social/Messaging)
+
+`discord`, `wacli`, `bird`
+
+### Đã xóa — Skills nhóm 3 (Food/Location)
+
+`food-order`, `ordercli`, `goplaces`, `local-places`
+
+### Đã xóa — Skills nhóm 4 (AI/Image/Audio generation)
+
+`nano-banana-pro`, `openai-image-gen`, `openai-whisper`, `openai-whisper-api`, `gemini`, `songsee`, `gifgrep`
+
+### Đã xóa — Skills lẻ (không liên quan DevOps)
+
+`weather`, `obsidian`, `video-frames`, `trello`
