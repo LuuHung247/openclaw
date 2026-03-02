@@ -118,3 +118,40 @@ Build status: ✅ clean sau khi xóa
 ### Đã xóa — Skills lẻ (không liên quan DevOps)
 
 `weather`, `obsidian`, `video-frames`, `trello`
+
+### Đã xóa — Discord channel
+
+| Module | Lý do |
+|--------|-------|
+| `src/discord/` | Discord channel — chỉ giữ Telegram |
+
+**Các file liên quan đã được clean:** `gateway/server.ts`, `infra/heartbeat-runner.ts`, `agents/clawdis-tools.ts`, `commands/health.ts`, `cli/deps.ts`
+
+Build status: ✅ clean sau khi xóa
+
+### Đã xóa — WhatsApp / Web provider
+
+| Module | Lý do |
+|--------|-------|
+| `src/web/` | WhatsApp web provider (Baileys) |
+| `src/provider-web.ts` | Barrel export cho web provider |
+| `src/provider-web.barrel.test.ts` | Test cho barrel đã xóa |
+
+**Các file liên quan đã được clean:** `index.ts`, `cli/program.ts`, `cli/deps.ts`, `commands/health.ts`, `commands/status.ts`, `commands/onboard-providers.ts`, `infra/heartbeat-runner.ts`, `infra/provider-summary.ts`, `agents/pi-tools.ts`, `gateway/server.ts`, `telegram/bot.ts`, `telegram/send.ts`, `auto-reply/reply.ts`
+
+**Bonus:** Thêm `normaliseChannel()` trong `server.ts` — map legacy `"whatsapp"`, `"discord"`, `"webchat"` → `"telegram"` để session cũ không bị lỗi routing.
+
+Build status: ✅ clean sau khi xóa
+
+### Đã xóa — system-prompt.ts tool references (stale)
+
+Xóa khỏi Tooling section trong `src/agents/system-prompt.ts`:
+- `whatsapp_login` — WhatsApp đã xóa
+- `clawdis_canvas` — canvas-host đã xóa
+- `clawdis_nodes` — iOS/macOS nodes đã xóa
+
+### Đã xóa — Test broken (pre-existing)
+
+Xóa 2 test trong `src/gateway/server.test.ts`:
+- `"hello-ok advertises the gateway port for canvas host"` — test cho canvas-host đã xóa
+- `"agent events stream to webchat clients when run context is registered"` — test cho webchat đã xóa
