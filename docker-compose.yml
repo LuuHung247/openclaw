@@ -5,6 +5,7 @@ services:
       HOME: /home/node
       TERM: xterm-256color
       CLAWDIS_GATEWAY_TOKEN: ${CLAWDIS_GATEWAY_TOKEN}
+      ZAI_API_KEY: ${ZAI_API_KEY}
     volumes:
       - ${CLAWDIS_CONFIG_DIR}:/home/node/.clawdis
       - ${CLAWDIS_WORKSPACE_DIR}:/home/node/clawd
@@ -30,6 +31,7 @@ services:
       HOME: /home/node
       TERM: xterm-256color
       BROWSER: echo
+      ZAI_API_KEY: ${ZAI_API_KEY}
     volumes:
       - ${CLAWDIS_CONFIG_DIR}:/home/node/.clawdis
       - ${CLAWDIS_WORKSPACE_DIR}:/home/node/clawd

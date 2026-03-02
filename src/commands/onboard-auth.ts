@@ -34,6 +34,33 @@ export async function setAnthropicApiKey(key: string) {
   authStorage.set("anthropic", { type: "api_key", key });
 }
 
+export async function setZaiApiKey(key: string) {
+  const agentDir = resolveClawdisAgentDir();
+  const authStorage = discoverAuthStorage(agentDir);
+  authStorage.set("zai", { type: "api_key", key });
+}
+
+export function applyZaiConfig(
+  cfg: ClawdisConfig,
+  model = "zai/glm-4.7",
+): ClawdisConfig {
+  const allowed = new Set(cfg.agent?.allowedModels ?? []);
+  allowed.add(model);
+
+  const aliases = { ...cfg.agent?.modelAliases };
+  if (!aliases.GLM) aliases.GLM = model;
+
+  return {
+    ...cfg,
+    agent: {
+      ...cfg.agent,
+      model,
+      allowedModels: Array.from(allowed),
+      modelAliases: aliases,
+    },
+  };
+}
+
 export function applyMinimaxConfig(cfg: ClawdisConfig): ClawdisConfig {
   const allowed = new Set(cfg.agent?.allowedModels ?? []);
   allowed.add("anthropic/claude-opus-4-5");

@@ -8,8 +8,6 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
-RUN pnpm ui:install
-RUN pnpm ui:build
 
 ENV NODE_ENV=production
 

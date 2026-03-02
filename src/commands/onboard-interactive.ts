@@ -29,7 +29,9 @@ import {
 import { healthCommand } from "./health.js";
 import {
   applyMinimaxConfig,
+  applyZaiConfig,
   setAnthropicApiKey,
+  setZaiApiKey,
   writeOAuthCredentials,
 } from "./onboard-auth.js";
 import {
@@ -129,9 +131,9 @@ export async function runInteractiveOnboarding(
   const remoteUrl = baseConfig.gateway?.remote?.url?.trim() ?? "";
   const remoteProbe = remoteUrl
     ? await probeGatewayReachable({
-        url: remoteUrl,
-        token: baseConfig.gateway?.remote?.token,
-      })
+      url: remoteUrl,
+      token: baseConfig.gateway?.remote?.token,
+    })
     : null;
 
   const mode =
@@ -206,6 +208,7 @@ export async function runInteractiveOnboarding(
           label: "Google Antigravity (Claude Opus 4.5, Gemini 3, etc.)",
         },
         { value: "apiKey", label: "Anthropic API key" },
+        { value: "zai", label: "Z.AI / GLM (glm-4.7, glm-4-flash, ...)" },
         { value: "minimax", label: "Minimax M2.1 (LM Studio)" },
         { value: "skip", label: "Skip for now" },
       ],
@@ -251,15 +254,15 @@ export async function runInteractiveOnboarding(
     note(
       isRemote
         ? [
-            "You are running in a remote/VPS environment.",
-            "A URL will be shown for you to open in your LOCAL browser.",
-            "After signing in, copy the redirect URL and paste it back here.",
-          ].join("\n")
+          "You are running in a remote/VPS environment.",
+          "A URL will be shown for you to open in your LOCAL browser.",
+          "After signing in, copy the redirect URL and paste it back here.",
+        ].join("\n")
         : [
-            "Browser will open for Google authentication.",
-            "Sign in with your Google account that has Antigravity access.",
-            "The callback will be captured automatically on localhost:51121.",
-          ].join("\n"),
+          "Browser will open for Google authentication.",
+          "Sign in with your Google account that has Antigravity access.",
+          "The callback will be captured automatically on localhost:51121.",
+        ].join("\n"),
       "Google Antigravity OAuth",
     );
     const spin = spinner();
@@ -308,6 +311,35 @@ export async function runInteractiveOnboarding(
       runtime,
     );
     await setAnthropicApiKey(String(key).trim());
+  } else if (authChoice === "zai") {
+    note(
+      [
+        "Get your API key at https://bigmodel.cn/usercenter/apikeys",
+        "Available models: glm-4.7, glm-4-flash, glm-4-plus, ...",
+      ].join("\n"),
+      "Z.AI / GLM",
+    );
+    const zaiKey = guardCancel(
+      await text({
+        message: "Enter Z.AI API key",
+        validate: (value) => (value?.trim() ? undefined : "Required"),
+      }),
+      runtime,
+    );
+    await setZaiApiKey(String(zaiKey).trim());
+    const zaiModel = guardCancel(
+      await select({
+        message: "Select GLM model",
+        options: [
+          { value: "zai/glm-4.7", label: "GLM-4.7 (recommended)" },
+          { value: "zai/glm-4-flash", label: "GLM-4-Flash (fast, free tier)" },
+          { value: "zai/glm-4-plus", label: "GLM-4-Plus" },
+          { value: "zai/glm-z1-flash", label: "GLM-Z1-Flash (reasoning)" },
+        ],
+      }),
+      runtime,
+    );
+    nextConfig = applyZaiConfig(nextConfig, String(zaiModel));
   } else if (authChoice === "minimax") {
     nextConfig = applyMinimaxConfig(nextConfig);
   }
@@ -476,60 +508,81 @@ export async function runInteractiveOnboarding(
   nextConfig = applyWizardMetadata(nextConfig, { command: "onboard", mode });
   await writeConfigFile(nextConfig);
 
-  const installDaemon = guardCancel(
-    await confirm({
-      message: "Install Gateway daemon (recommended)",
-      initialValue: true,
-    }),
-    runtime,
-  );
+  // Detect Docker environment (systemd không available trong container)
+  const isInDocker =
+    process.env.container === "docker" ||
+    (await import("node:fs")
+      .then((fs) => fs.promises.access("/.dockerenv").then(() => true).catch(() => false)));
 
-  if (installDaemon) {
-    const service = resolveGatewayService();
-    const loaded = await service.isLoaded({ env: process.env });
-    if (loaded) {
-      const action = guardCancel(
-        await select({
-          message: "Gateway service already installed",
-          options: [
-            { value: "restart", label: "Restart" },
-            { value: "reinstall", label: "Reinstall" },
-            { value: "skip", label: "Skip" },
-          ],
-        }),
-        runtime,
-      );
-      if (action === "restart") {
-        await service.restart({ stdout: process.stdout });
-      } else if (action === "reinstall") {
-        await service.uninstall({ env: process.env, stdout: process.stdout });
+  if (isInDocker) {
+    note(
+      [
+        "Đang chạy trong Docker — bỏ qua bước install systemd daemon.",
+        "",
+        "Để chạy gateway tự động:",
+        "  docker compose up -d clawdis-gateway",
+        "",
+        "Xem logs:",
+        "  docker compose logs -f clawdis-gateway",
+      ].join("\n"),
+      "Docker: dùng docker compose thay vì daemon",
+    );
+  } else {
+    const installDaemon = guardCancel(
+      await confirm({
+        message: "Install Gateway daemon (recommended)",
+        initialValue: true,
+      }),
+      runtime,
+    );
+
+    if (installDaemon) {
+      const service = resolveGatewayService();
+      const loaded = await service.isLoaded({ env: process.env });
+      if (loaded) {
+        const action = guardCancel(
+          await select({
+            message: "Gateway service already installed",
+            options: [
+              { value: "restart", label: "Restart" },
+              { value: "reinstall", label: "Reinstall" },
+              { value: "skip", label: "Skip" },
+            ],
+          }),
+          runtime,
+        );
+        if (action === "restart") {
+          await service.restart({ stdout: process.stdout });
+        } else if (action === "reinstall") {
+          await service.uninstall({ env: process.env, stdout: process.stdout });
+        }
       }
-    }
 
-    if (
-      !loaded ||
-      (loaded && (await service.isLoaded({ env: process.env })) === false)
-    ) {
-      const devMode =
-        process.argv[1]?.includes(`${path.sep}src${path.sep}`) &&
-        process.argv[1]?.endsWith(".ts");
-      const { programArguments, workingDirectory } =
-        await resolveGatewayProgramArguments({ port, dev: devMode });
-      const environment: Record<string, string | undefined> = {
-        PATH: process.env.PATH,
-        CLAWDIS_GATEWAY_TOKEN: gatewayToken,
-        CLAWDIS_LAUNCHD_LABEL:
-          process.platform === "darwin"
-            ? GATEWAY_LAUNCH_AGENT_LABEL
-            : undefined,
-      };
-      await service.install({
-        env: process.env,
-        stdout: process.stdout,
-        programArguments,
-        workingDirectory,
-        environment,
-      });
+      if (
+        !loaded ||
+        (loaded && (await service.isLoaded({ env: process.env })) === false)
+      ) {
+        const devMode =
+          process.argv[1]?.includes(`${path.sep}src${path.sep}`) &&
+          process.argv[1]?.endsWith(".ts");
+        const { programArguments, workingDirectory } =
+          await resolveGatewayProgramArguments({ port, dev: devMode });
+        const environment: Record<string, string | undefined> = {
+          PATH: process.env.PATH,
+          CLAWDIS_GATEWAY_TOKEN: gatewayToken,
+          CLAWDIS_LAUNCHD_LABEL:
+            process.platform === "darwin"
+              ? GATEWAY_LAUNCH_AGENT_LABEL
+              : undefined,
+        };
+        await service.install({
+          env: process.env,
+          stdout: process.stdout,
+          programArguments,
+          workingDirectory,
+          environment,
+        });
+      }
     }
   }
 

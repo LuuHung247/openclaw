@@ -3,6 +3,7 @@ export type AuthChoice =
   | "oauth"
   | "antigravity"
   | "apiKey"
+  | "zai"
   | "minimax"
   | "skip";
 export type GatewayAuthChoice = "off" | "token" | "password";
@@ -20,6 +21,7 @@ export type OnboardOptions = {
   nonInteractive?: boolean;
   authChoice?: AuthChoice;
   anthropicApiKey?: string;
+  zaiApiKey?: string;
   gatewayPort?: number;
   gatewayBind?: GatewayBind;
   gatewayAuth?: GatewayAuthChoice;
