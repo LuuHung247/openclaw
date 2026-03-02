@@ -29,7 +29,6 @@ import {
 import { assertSupportedRuntime } from "./infra/runtime-guard.js";
 import { enableConsoleCapture } from "./logging.js";
 import { runCommandWithTimeout, runExec } from "./process/exec.js";
-import { monitorWebProvider } from "./provider-web.js";
 import { assertProvider, normalizeE164, toWhatsappJid } from "./utils.js";
 
 dotenv.config({ quiet: true });
@@ -58,7 +57,6 @@ export {
   handlePortError,
   loadConfig,
   loadSessionStore,
-  monitorWebProvider,
   normalizeE164,
   PortInUseError,
   promptYesNo,

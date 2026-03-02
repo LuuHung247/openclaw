@@ -61,11 +61,6 @@ import {
 import { CronService } from "../cron/service.js";
 import { resolveCronStorePath } from "../cron/store.js";
 import type { CronJob, CronJobCreate, CronJobPatch } from "../cron/types.js";
-import {
-  monitorDiscordProvider,
-  sendMessageDiscord,
-} from "../discord/index.js";
-import { type DiscordProbe, probeDiscord } from "../discord/probe.js";
 import { isVerbose } from "../globals.js";
 import { startGmailWatcher, stopGmailWatcher } from "../hooks/gmail-watcher.js";
 import {
@@ -134,17 +129,12 @@ import {
 } from "../logging.js";
 import { setCommandLaneConcurrency } from "../process/command-queue.js";
 import { runExec } from "../process/exec.js";
-import { monitorWebProvider, webAuthExists } from "../providers/web/index.js";
 import { defaultRuntime } from "../runtime.js";
 import { monitorTelegramProvider } from "../telegram/monitor.js";
 import { probeTelegram, type TelegramProbe } from "../telegram/probe.js";
 import { sendMessageTelegram } from "../telegram/send.js";
 import { resolveTelegramToken } from "../telegram/token.js";
-import { normalizeE164, resolveUserPath } from "../utils.js";
-import type { WebProviderStatus } from "../web/auto-reply.js";
-import { startWebLoginWithQr, waitForWebLogin } from "../web/login-qr.js";
-import { sendMessageWhatsApp } from "../web/outbound.js";
-import { getWebAuthAgeMs, logoutWeb, readWebSelfId } from "../web/session.js";
+import { resolveUserPath } from "../utils.js";
 import {
   assertGatewayAuthConfigured,
   authorizeGatewayConnect,
@@ -276,12 +266,8 @@ const logHealth = log.child("health");
 const logCron = log.child("cron");
 const logHooks = log.child("hooks");
 const logWsControl = log.child("ws");
-const logWhatsApp = logProviders.child("whatsapp");
 const logTelegram = logProviders.child("telegram");
-const logDiscord = logProviders.child("discord");
-const whatsappRuntimeEnv = runtimeForLogger(logWhatsApp);
 const telegramRuntimeEnv = runtimeForLogger(logTelegram);
-const discordRuntimeEnv = runtimeForLogger(logDiscord);
 
 function resolveBonjourCliPath(): string | undefined {
   const envPath = process.env.CLAWDIS_CLI_PATH?.trim();
@@ -507,9 +493,6 @@ const METHODS = [
   "system-event",
   "send",
   "agent",
-  "web.login.start",
-  "web.login.wait",
-  "web.logout",
   "telegram.logout",
   // WebChat WebSocket-native chat methods
   "chat.history",
@@ -1403,9 +1386,7 @@ export async function startGatewayServer(
           deliver: boolean;
           channel:
             | "last"
-            | "whatsapp"
-            | "telegram"
-            | "discord";
+            | "telegram";
           to?: string;
           thinking?: string;
           timeoutSeconds?: number;
@@ -1427,9 +1408,7 @@ export async function startGatewayServer(
         : `hook:${randomUUID()}`;
     const channelRaw = payload.channel;
     const channel =
-      channelRaw === "whatsapp" ||
       channelRaw === "telegram" ||
-      channelRaw === "discord" ||
       channelRaw === "last"
         ? channelRaw
         : channelRaw === undefined
@@ -1438,7 +1417,7 @@ export async function startGatewayServer(
     if (channel === null) {
       return {
         ok: false,
-        error: "channel must be last|whatsapp|telegram|discord",
+        error: "channel must be last|telegram",
       };
     }
     const toRaw = payload.to;
@@ -1491,9 +1470,7 @@ export async function startGatewayServer(
     deliver: boolean;
     channel:
       | "last"
-      | "whatsapp"
-      | "telegram"
-      | "discord";
+      | "telegram";
     to?: string;
     thinking?: string;
     timeoutSeconds?: number;
@@ -1750,22 +1727,8 @@ export async function startGatewayServer(
       wss.emit("connection", ws, req);
     });
   });
-  let whatsappAbort: AbortController | null = null;
   let telegramAbort: AbortController | null = null;
-  let discordAbort: AbortController | null = null;
-  let whatsappTask: Promise<unknown> | null = null;
   let telegramTask: Promise<unknown> | null = null;
-  let discordTask: Promise<unknown> | null = null;
-  let whatsappRuntime: WebProviderStatus = {
-    running: false,
-    connected: false,
-    reconnectAttempts: 0,
-    lastConnectedAt: null,
-    lastDisconnect: null,
-    lastMessageAt: null,
-    lastEventAt: null,
-    lastError: null,
-  };
   let telegramRuntime: {
     running: boolean;
     lastStartAt?: number | null;
@@ -1778,17 +1741,6 @@ export async function startGatewayServer(
     lastStopAt: null,
     lastError: null,
     mode: null,
-  };
-  let discordRuntime: {
-    running: boolean;
-    lastStartAt?: number | null;
-    lastStopAt?: number | null;
-    lastError?: string | null;
-  } = {
-    running: false,
-    lastStartAt: null,
-    lastStopAt: null,
-    lastError: null,
   };
   const clients = new Set<Client>();
   let seq = 0;
@@ -1913,87 +1865,6 @@ export async function startGatewayServer(
     },
   });
 
-  const updateWhatsAppStatus = (next: WebProviderStatus) => {
-    whatsappRuntime = next;
-  };
-
-  const startWhatsAppProvider = async () => {
-    if (whatsappTask) return;
-    const cfg = loadConfig();
-    if (cfg.web?.enabled === false) {
-      whatsappRuntime = {
-        ...whatsappRuntime,
-        running: false,
-        connected: false,
-        lastError: "disabled",
-      };
-      logWhatsApp.info("skipping provider start (web.enabled=false)");
-      return;
-    }
-    if (!(await webAuthExists())) {
-      whatsappRuntime = {
-        ...whatsappRuntime,
-        running: false,
-        connected: false,
-        lastError: "not linked",
-      };
-      logWhatsApp.info("skipping provider start (no linked session)");
-      return;
-    }
-    const { e164, jid } = readWebSelfId();
-    const identity = e164 ? e164 : jid ? `jid ${jid}` : "unknown";
-    logWhatsApp.info(`starting provider (${identity})`);
-    whatsappAbort = new AbortController();
-    whatsappRuntime = {
-      ...whatsappRuntime,
-      running: true,
-      connected: false,
-      lastError: null,
-    };
-    const task = monitorWebProvider(
-      isVerbose(),
-      undefined,
-      true,
-      undefined,
-      whatsappRuntimeEnv,
-      whatsappAbort.signal,
-      { statusSink: updateWhatsAppStatus },
-    )
-      .catch((err) => {
-        whatsappRuntime = {
-          ...whatsappRuntime,
-          lastError: formatError(err),
-        };
-        logWhatsApp.error(`provider exited: ${formatError(err)}`);
-      })
-      .finally(() => {
-        whatsappAbort = null;
-        whatsappTask = null;
-        whatsappRuntime = {
-          ...whatsappRuntime,
-          running: false,
-          connected: false,
-        };
-      });
-    whatsappTask = task;
-  };
-
-  const stopWhatsAppProvider = async () => {
-    if (!whatsappAbort && !whatsappTask) return;
-    whatsappAbort?.abort();
-    try {
-      await whatsappTask;
-    } catch {
-      // ignore
-    }
-    whatsappAbort = null;
-    whatsappTask = null;
-    whatsappRuntime = {
-      ...whatsappRuntime,
-      running: false,
-      connected: false,
-    };
-  };
 
   const startTelegramProvider = async () => {
     if (telegramTask) return;
@@ -2098,103 +1969,8 @@ export async function startGatewayServer(
     };
   };
 
-  const startDiscordProvider = async () => {
-    if (discordTask) return;
-    const cfg = loadConfig();
-    if (cfg.discord?.enabled === false) {
-      discordRuntime = {
-        ...discordRuntime,
-        running: false,
-        lastError: "disabled",
-      };
-      if (isVerbose()) {
-        logDiscord.debug("discord provider disabled (discord.enabled=false)");
-      }
-      return;
-    }
-    const discordToken =
-      process.env.DISCORD_BOT_TOKEN ?? cfg.discord?.token ?? "";
-    if (!discordToken.trim()) {
-      discordRuntime = {
-        ...discordRuntime,
-        running: false,
-        lastError: "not configured",
-      };
-      // keep quiet by default; this is a normal state
-      if (isVerbose()) {
-        logDiscord.debug(
-          "discord provider not configured (no DISCORD_BOT_TOKEN)",
-        );
-      }
-      return;
-    }
-    let discordBotLabel = "";
-    try {
-      const probe = await probeDiscord(discordToken.trim(), 2500);
-      const username = probe.ok ? probe.bot?.username?.trim() : null;
-      if (username) discordBotLabel = ` (@${username})`;
-    } catch (err) {
-      if (isVerbose()) {
-        logDiscord.debug(`bot probe failed: ${String(err)}`);
-      }
-    }
-    logDiscord.info(
-      `starting provider${discordBotLabel}${cfg.discord ? "" : " (no discord config; token via env)"}`,
-    );
-    discordAbort = new AbortController();
-    discordRuntime = {
-      ...discordRuntime,
-      running: true,
-      lastStartAt: Date.now(),
-      lastError: null,
-    };
-    const task = monitorDiscordProvider({
-      token: discordToken.trim(),
-      runtime: discordRuntimeEnv,
-      abortSignal: discordAbort.signal,
-      slashCommand: cfg.discord?.slashCommand,
-      mediaMaxMb: cfg.discord?.mediaMaxMb,
-      historyLimit: cfg.discord?.historyLimit,
-    })
-      .catch((err) => {
-        discordRuntime = {
-          ...discordRuntime,
-          lastError: formatError(err),
-        };
-        logDiscord.error(`provider exited: ${formatError(err)}`);
-      })
-      .finally(() => {
-        discordAbort = null;
-        discordTask = null;
-        discordRuntime = {
-          ...discordRuntime,
-          running: false,
-          lastStopAt: Date.now(),
-        };
-      });
-    discordTask = task;
-  };
-
-  const stopDiscordProvider = async () => {
-    if (!discordAbort && !discordTask) return;
-    discordAbort?.abort();
-    try {
-      await discordTask;
-    } catch {
-      // ignore
-    }
-    discordAbort = null;
-    discordTask = null;
-    discordRuntime = {
-      ...discordRuntime,
-      running: false,
-      lastStopAt: Date.now(),
-    };
-  };
 
   const startProviders = async () => {
-    await startWhatsAppProvider();
-    await startDiscordProvider();
     await startTelegramProvider();
   };
 
@@ -3218,7 +2994,6 @@ export async function startGatewayServer(
           typeof link?.channel === "string" ? link.channel.trim() : "";
         const channel = channelRaw.toLowerCase();
         const provider =
-          channel === "whatsapp" ||
           channel === "telegram"
             ? channel
             : undefined;
@@ -4087,50 +3862,10 @@ export async function startGatewayServer(
                 lastProbeAt = Date.now();
               }
 
-              const discordCfg = cfg.discord;
-              const discordEnabled =
-                Boolean(discordCfg) && discordCfg?.enabled !== false;
-              const discordEnvToken = discordEnabled
-                ? process.env.DISCORD_BOT_TOKEN?.trim()
-                : "";
-              const discordConfigToken = discordEnabled
-                ? discordCfg?.token?.trim()
-                : "";
-              const discordToken = discordEnvToken || discordConfigToken || "";
-              const discordTokenSource = discordEnvToken
-                ? "env"
-                : discordConfigToken
-                  ? "config"
-                  : "none";
-              let discordProbe: DiscordProbe | undefined;
-              let discordLastProbeAt: number | null = null;
-              if (probe && discordToken && discordEnabled) {
-                discordProbe = await probeDiscord(discordToken, timeoutMs);
-                discordLastProbeAt = Date.now();
-              }
-
-              const linked = await webAuthExists();
-              const authAgeMs = getWebAuthAgeMs();
-              const self = readWebSelfId();
-
               respond(
                 true,
                 {
                   ts: Date.now(),
-                  whatsapp: {
-                    configured: linked,
-                    linked,
-                    authAgeMs,
-                    self,
-                    running: whatsappRuntime.running,
-                    connected: whatsappRuntime.connected,
-                    lastConnectedAt: whatsappRuntime.lastConnectedAt ?? null,
-                    lastDisconnect: whatsappRuntime.lastDisconnect ?? null,
-                    reconnectAttempts: whatsappRuntime.reconnectAttempts,
-                    lastMessageAt: whatsappRuntime.lastMessageAt ?? null,
-                    lastEventAt: whatsappRuntime.lastEventAt ?? null,
-                    lastError: whatsappRuntime.lastError ?? null,
-                  },
                   telegram: {
                     configured: telegramEnabled && Boolean(telegramToken),
                     tokenSource,
@@ -4141,16 +3876,6 @@ export async function startGatewayServer(
                     lastError: telegramRuntime.lastError ?? null,
                     probe: telegramProbe,
                     lastProbeAt,
-                  },
-                  discord: {
-                    configured: discordEnabled && Boolean(discordToken),
-                    tokenSource: discordTokenSource,
-                    running: discordRuntime.running,
-                    lastStartAt: discordRuntime.lastStartAt ?? null,
-                    lastStopAt: discordRuntime.lastStopAt ?? null,
-                    lastError: discordRuntime.lastError ?? null,
-                    probe: discordProbe,
-                    lastProbeAt: discordLastProbeAt,
                   },
                 },
                 undefined,
@@ -4588,94 +4313,6 @@ export async function startGatewayServer(
             case "status": {
               const status = await getStatusSummary();
               respond(true, status, undefined);
-              break;
-            }
-            case "web.login.start": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (!validateWebLoginStartParams(params)) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    `invalid web.login.start params: ${formatValidationErrors(validateWebLoginStartParams.errors)}`,
-                  ),
-                );
-                break;
-              }
-              try {
-                await stopWhatsAppProvider();
-                const result = await startWebLoginWithQr({
-                  force: Boolean((params as { force?: boolean }).force),
-                  timeoutMs:
-                    typeof (params as { timeoutMs?: unknown }).timeoutMs ===
-                    "number"
-                      ? (params as { timeoutMs?: number }).timeoutMs
-                      : undefined,
-                  verbose: Boolean((params as { verbose?: boolean }).verbose),
-                });
-                respond(true, result, undefined);
-              } catch (err) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)),
-                );
-              }
-              break;
-            }
-            case "web.login.wait": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (!validateWebLoginWaitParams(params)) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    `invalid web.login.wait params: ${formatValidationErrors(validateWebLoginWaitParams.errors)}`,
-                  ),
-                );
-                break;
-              }
-              try {
-                const result = await waitForWebLogin({
-                  timeoutMs:
-                    typeof (params as { timeoutMs?: unknown }).timeoutMs ===
-                    "number"
-                      ? (params as { timeoutMs?: number }).timeoutMs
-                      : undefined,
-                });
-                if (result.connected) {
-                  await startWhatsAppProvider();
-                }
-                respond(true, result, undefined);
-              } catch (err) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)),
-                );
-              }
-              break;
-            }
-            case "web.logout": {
-              try {
-                await stopWhatsAppProvider();
-                const cleared = await logoutWeb(defaultRuntime);
-                whatsappRuntime = {
-                  ...whatsappRuntime,
-                  running: false,
-                  connected: false,
-                  lastError: cleared ? "logged out" : whatsappRuntime.lastError,
-                };
-                respond(true, { cleared }, undefined);
-              } catch (err) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)),
-                );
-              }
               break;
             }
             case "telegram.logout": {
@@ -6005,7 +5642,7 @@ export async function startGatewayServer(
               }
               const to = params.to.trim();
               const message = params.message.trim();
-              const provider = (params.provider ?? "whatsapp").toLowerCase();
+              const provider = (params.provider ?? "telegram").toLowerCase();
               try {
                 if (provider === "telegram") {
                   const cfg = loadConfig();
@@ -6027,40 +5664,8 @@ export async function startGatewayServer(
                     payload,
                   });
                   respond(true, payload, undefined, { provider });
-                } else if (provider === "discord") {
-                  const result = await sendMessageDiscord(to, message, {
-                    mediaUrl: params.mediaUrl,
-                    token: process.env.DISCORD_BOT_TOKEN,
-                  });
-                  const payload = {
-                    runId: idem,
-                    messageId: result.messageId,
-                    channelId: result.channelId,
-                    provider,
-                  };
-                  dedupe.set(`send:${idem}`, {
-                    ts: Date.now(),
-                    ok: true,
-                    payload,
-                  });
-                  respond(true, payload, undefined, { provider });
                 } else {
-                  const result = await sendMessageWhatsApp(to, message, {
-                    mediaUrl: params.mediaUrl,
-                    verbose: isVerbose(),
-                  });
-                  const payload = {
-                    runId: idem,
-                    messageId: result.messageId,
-                    toJid: result.toJid ?? `${to}@s.whatsapp.net`,
-                    provider,
-                  };
-                  dedupe.set(`send:${idem}`, {
-                    ts: Date.now(),
-                    ok: true,
-                    payload,
-                  });
-                  respond(true, payload, undefined, { provider });
+                  throw new Error(`Unsupported provider: ${provider}`);
                 }
               } catch (err) {
                 const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
@@ -6169,25 +5774,28 @@ export async function startGatewayServer(
                   ? sessionEntry.lastTo.trim()
                   : "";
 
+              // Channels supported for delivery. Legacy "whatsapp"/"discord" entries
+              // are normalised to "telegram" since those providers were removed.
+              const normaliseChannel = (ch: string | undefined): string => {
+                if (!ch || ch === "webchat" || ch === "whatsapp" || ch === "discord") {
+                  return "telegram";
+                }
+                return ch;
+              };
+
               const resolvedChannel = (() => {
                 if (requestedChannel === "last") {
                   // WebChat is not a deliverable surface. Treat it as "unset" for routing,
                   // so VoiceWake and CLI callers don't get stuck with deliver=false.
-                  return lastChannel && lastChannel !== "webchat"
-                    ? lastChannel
-                    : "whatsapp";
+                  return normaliseChannel(lastChannel);
                 }
                 if (
-                  requestedChannel === "whatsapp" ||
                   requestedChannel === "telegram" ||
-                  requestedChannel === "discord" ||
                   requestedChannel === "webchat"
                 ) {
                   return requestedChannel;
                 }
-                return lastChannel && lastChannel !== "webchat"
-                  ? lastChannel
-                  : "whatsapp";
+                return normaliseChannel(lastChannel);
               })();
 
               const resolvedTo = (() => {
@@ -6197,42 +5805,11 @@ export async function startGatewayServer(
                     : undefined;
                 if (explicit) return explicit;
                 if (
-                  resolvedChannel === "whatsapp" ||
-                  resolvedChannel === "telegram" ||
-                  resolvedChannel === "discord"
+                  resolvedChannel === "telegram"
                 ) {
                   return lastTo || undefined;
                 }
                 return undefined;
-              })();
-
-              const sanitizedTo = (() => {
-                // If we derived a WhatsApp recipient from session "lastTo", ensure it is still valid
-                // for the configured allowlist. Otherwise, fall back to the first allowed number so
-                // voice wake doesn't silently route to stale/test recipients.
-                if (resolvedChannel !== "whatsapp") return resolvedTo;
-                const explicit =
-                  typeof params.to === "string" && params.to.trim()
-                    ? params.to.trim()
-                    : undefined;
-                if (explicit) return resolvedTo;
-
-                const cfg = cfgForAgent ?? loadConfig();
-                const rawAllow = cfg.whatsapp?.allowFrom ?? [];
-                if (rawAllow.includes("*")) return resolvedTo;
-                const allowFrom = rawAllow
-                  .map((val) => normalizeE164(val))
-                  .filter((val) => val.length > 1);
-                if (allowFrom.length === 0) return resolvedTo;
-
-                const normalizedLast =
-                  typeof resolvedTo === "string" && resolvedTo.trim()
-                    ? normalizeE164(resolvedTo)
-                    : undefined;
-                if (normalizedLast && allowFrom.includes(normalizedLast)) {
-                  return normalizedLast;
-                }
-                return allowFrom[0];
               })();
 
               const deliver =
@@ -6250,7 +5827,7 @@ export async function startGatewayServer(
               void agentCommand(
                 {
                   message,
-                  to: sanitizedTo,
+                  to: resolvedTo,
                   sessionId: resolvedSessionId,
                   thinking: params.thinking,
                   deliver,
@@ -6406,7 +5983,7 @@ export async function startGatewayServer(
     }
   }
 
-  // Launch configured providers (WhatsApp Web, Discord, Telegram) so gateway replies via the
+  // Launch configured providers (Telegram) so gateway replies via the
   // surface the message came from. Tests can opt out via CLAWDIS_SKIP_PROVIDERS.
   if (process.env.CLAWDIS_SKIP_PROVIDERS !== "1") {
     try {
@@ -6445,9 +6022,7 @@ export async function startGatewayServer(
           /* ignore */
         }
       }
-      await stopWhatsAppProvider();
       await stopTelegramProvider();
-      await stopDiscordProvider();
       await stopGmailWatcher();
       cron.stop();
       heartbeatRunner.stop();
@@ -6486,7 +6061,7 @@ export async function startGatewayServer(
         await stopBrowserControlServerIfStarted().catch(() => {});
       }
       await Promise.allSettled(
-        [whatsappTask, telegramTask, discordTask].filter(
+        [telegramTask].filter(
           Boolean,
         ) as Array<Promise<unknown>>,
       );

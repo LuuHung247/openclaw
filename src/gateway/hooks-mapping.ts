@@ -20,9 +20,7 @@ export type HookMappingResolved = {
   deliver?: boolean;
   channel?:
     | "last"
-    | "whatsapp"
-    | "telegram"
-    | "discord";
+    | "telegram";
   to?: string;
   thinking?: string;
   timeoutSeconds?: number;
@@ -56,9 +54,7 @@ export type HookAction =
       deliver?: boolean;
       channel?:
         | "last"
-        | "whatsapp"
-        | "telegram"
-        | "discord";
+        | "telegram";
       to?: string;
       thinking?: string;
       timeoutSeconds?: number;
@@ -95,7 +91,7 @@ type HookTransformResult = Partial<{
   name: string;
   sessionKey: string;
   deliver: boolean;
-  channel: "last" | "whatsapp" | "telegram" | "discord";
+  channel: "last" | "telegram";
   to: string;
   thinking: string;
   timeoutSeconds: number;

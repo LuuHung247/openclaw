@@ -19,7 +19,7 @@ import { mediaKindFromMime } from "../media/constants.js";
 import { detectMime } from "../media/mime.js";
 import { saveMediaBuffer } from "../media/store.js";
 import type { RuntimeEnv } from "../runtime.js";
-import { loadWebMedia } from "../web/media.js";
+import { loadWebMedia } from "../media/fetch.js";
 
 const PARSE_ERR_RE =
   /can't parse entities|parse entities|find end of the entity/i;

@@ -65,16 +65,16 @@ describe("resolveHeartbeatDeliveryTarget", () => {
     });
   });
 
-  it("uses last route by default", () => {
+  it("uses last telegram route by default", () => {
     const cfg: ClawdisConfig = {};
     const entry = {
       ...baseEntry,
-      lastChannel: "whatsapp" as const,
-      lastTo: "+1555",
+      lastChannel: "telegram" as const,
+      lastTo: "123456",
     };
     expect(resolveHeartbeatDeliveryTarget({ cfg, entry })).toEqual({
-      channel: "whatsapp",
-      to: "+1555",
+      channel: "telegram",
+      to: "123456",
     });
   });
 
@@ -88,23 +88,6 @@ describe("resolveHeartbeatDeliveryTarget", () => {
     expect(resolveHeartbeatDeliveryTarget({ cfg, entry })).toEqual({
       channel: "none",
       reason: "no-target",
-    });
-  });
-
-  it("applies allowFrom fallback for WhatsApp targets", () => {
-    const cfg: ClawdisConfig = {
-      agent: { heartbeat: { target: "whatsapp", to: "+1999" } },
-      whatsapp: { allowFrom: ["+1555", "+1666"] },
-    };
-    const entry = {
-      ...baseEntry,
-      lastChannel: "whatsapp" as const,
-      lastTo: "+1222",
-    };
-    expect(resolveHeartbeatDeliveryTarget({ cfg, entry })).toEqual({
-      channel: "whatsapp",
-      to: "+1555",
-      reason: "allowFrom-fallback",
     });
   });
 
@@ -132,8 +115,8 @@ describe("runHeartbeatOnce", () => {
             main: {
               sessionId: "sid",
               updatedAt: Date.now(),
-              lastChannel: "whatsapp",
-              lastTo: "+1555",
+              lastChannel: "telegram",
+              lastTo: "123456",
             },
           },
           null,
@@ -143,9 +126,8 @@ describe("runHeartbeatOnce", () => {
 
       const cfg: ClawdisConfig = {
         agent: {
-          heartbeat: { every: "5m", target: "whatsapp", to: "+1555" },
+          heartbeat: { every: "5m", target: "telegram", to: "123456" },
         },
-        whatsapp: { allowFrom: ["*"] },
         session: { store: storePath },
       };
 
@@ -153,83 +135,26 @@ describe("runHeartbeatOnce", () => {
         { text: "Let me check..." },
         { text: "Final alert" },
       ]);
-      const sendWhatsApp = vi.fn().mockResolvedValue({
+      const sendTelegram = vi.fn().mockResolvedValue({
         messageId: "m1",
-        toJid: "jid",
+        chatId: "123456",
       });
 
       await runHeartbeatOnce({
         cfg,
         deps: {
-          sendWhatsApp,
+          sendTelegram,
           getQueueSize: () => 0,
           nowMs: () => 0,
-          webAuthExists: async () => true,
-          hasActiveWebListener: () => true,
         },
       });
 
-      expect(sendWhatsApp).toHaveBeenCalledTimes(1);
-      expect(sendWhatsApp).toHaveBeenCalledWith(
-        "+1555",
+      expect(sendTelegram).toHaveBeenCalledTimes(1);
+      expect(sendTelegram).toHaveBeenCalledWith(
+        "123456",
         "Final alert",
         expect.any(Object),
       );
-    } finally {
-      replySpy.mockRestore();
-      await fs.rm(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it("skips WhatsApp delivery when not linked or running", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdis-hb-"));
-    const storePath = path.join(tmpDir, "sessions.json");
-    const replySpy = vi.spyOn(replyModule, "getReplyFromConfig");
-    try {
-      await fs.writeFile(
-        storePath,
-        JSON.stringify(
-          {
-            main: {
-              sessionId: "sid",
-              updatedAt: Date.now(),
-              lastChannel: "whatsapp",
-              lastTo: "+1555",
-            },
-          },
-          null,
-          2,
-        ),
-      );
-
-      const cfg: ClawdisConfig = {
-        agent: {
-          heartbeat: { every: "5m", target: "whatsapp", to: "+1555" },
-        },
-        whatsapp: { allowFrom: ["*"] },
-        session: { store: storePath },
-      };
-
-      replySpy.mockResolvedValue({ text: "Heartbeat alert" });
-      const sendWhatsApp = vi.fn().mockResolvedValue({
-        messageId: "m1",
-        toJid: "jid",
-      });
-
-      const res = await runHeartbeatOnce({
-        cfg,
-        deps: {
-          sendWhatsApp,
-          getQueueSize: () => 0,
-          nowMs: () => 0,
-          webAuthExists: async () => false,
-          hasActiveWebListener: () => false,
-        },
-      });
-
-      expect(res.status).toBe("skipped");
-      expect(res).toMatchObject({ reason: "whatsapp-not-linked" });
-      expect(sendWhatsApp).not.toHaveBeenCalled();
     } finally {
       replySpy.mockRestore();
       await fs.rm(tmpDir, { recursive: true, force: true });

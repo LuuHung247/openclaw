@@ -14,16 +14,11 @@ import {
   type SessionEntry,
   saveSessionStore,
 } from "../config/sessions.js";
-import { sendMessageDiscord } from "../discord/send.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging.js";
 import { getQueueSize } from "../process/command-queue.js";
-import { webAuthExists } from "../providers/web/index.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { sendMessageTelegram } from "../telegram/send.js";
-import { normalizeE164 } from "../utils.js";
-import { getActiveWebListener } from "../web/active-listener.js";
-import { sendMessageWhatsApp } from "../web/outbound.js";
 import { emitHeartbeatEvent } from "./heartbeat-events.js";
 import {
   type HeartbeatRunResult,
@@ -33,26 +28,20 @@ import {
 
 export type HeartbeatTarget =
   | "last"
-  | "whatsapp"
   | "telegram"
-  | "discord"
   | "none";
 
 export type HeartbeatDeliveryTarget = {
-  channel: "whatsapp" | "telegram" | "discord" | "none";
+  channel: "telegram" | "none";
   to?: string;
   reason?: string;
 };
 
 type HeartbeatDeps = {
   runtime?: RuntimeEnv;
-  sendWhatsApp?: typeof sendMessageWhatsApp;
   sendTelegram?: typeof sendMessageTelegram;
-  sendDiscord?: typeof sendMessageDiscord;
   getQueueSize?: (lane?: string) => number;
   nowMs?: () => number;
-  webAuthExists?: () => Promise<boolean>;
-  hasActiveWebListener?: () => boolean;
 };
 
 const log = createSubsystemLogger("gateway/heartbeat");
@@ -125,7 +114,6 @@ function resolveHeartbeatSender(params: {
   const candidates = [
     lastTo?.trim(),
     lastChannel === "telegram" && lastTo ? `telegram:${lastTo}` : undefined,
-    lastChannel === "whatsapp" && lastTo ? `whatsapp:${lastTo}` : undefined,
   ].filter((val): val is string => Boolean(val?.trim()));
 
   const allowList = allowFrom
@@ -147,26 +135,6 @@ function resolveHeartbeatSender(params: {
   return candidates[0] ?? "heartbeat";
 }
 
-async function resolveWhatsAppReadiness(
-  cfg: ClawdisConfig,
-  deps?: HeartbeatDeps,
-): Promise<{ ok: boolean; reason: string }> {
-  if (cfg.web?.enabled === false) {
-    return { ok: false, reason: "whatsapp-disabled" };
-  }
-  const authExists = await (deps?.webAuthExists ?? webAuthExists)();
-  if (!authExists) {
-    return { ok: false, reason: "whatsapp-not-linked" };
-  }
-  const listenerActive = deps?.hasActiveWebListener
-    ? deps.hasActiveWebListener()
-    : Boolean(getActiveWebListener());
-  if (!listenerActive) {
-    return { ok: false, reason: "whatsapp-not-running" };
-  }
-  return { ok: true, reason: "ok" };
-}
-
 export function resolveHeartbeatDeliveryTarget(params: {
   cfg: ClawdisConfig;
   entry?: SessionEntry;
@@ -174,9 +142,7 @@ export function resolveHeartbeatDeliveryTarget(params: {
   const { cfg, entry } = params;
   const rawTarget = cfg.agent?.heartbeat?.target;
   const target: HeartbeatTarget =
-    rawTarget === "whatsapp" ||
     rawTarget === "telegram" ||
-    rawTarget === "discord" ||
     rawTarget === "none" ||
     rawTarget === "last"
       ? rawTarget
@@ -196,23 +162,15 @@ export function resolveHeartbeatDeliveryTarget(params: {
       ? entry.lastChannel
       : undefined;
   const lastChannel =
-    lastChannelRaw === "whatsapp" ||
-    lastChannelRaw === "telegram" ||
-    lastChannelRaw === "discord"
+    lastChannelRaw === "telegram"
       ? lastChannelRaw
       : undefined;
   const lastTo = typeof entry?.lastTo === "string" ? entry.lastTo.trim() : "";
 
-  const channel:
-    | "whatsapp"
-    | "telegram"
-    | "discord"
-    | undefined =
+  const channel: "telegram" | undefined =
     target === "last"
       ? lastChannel
-      : target === "whatsapp" ||
-          target === "telegram" ||
-          target === "discord"
+      : target === "telegram"
         ? target
         : undefined;
 
@@ -225,20 +183,7 @@ export function resolveHeartbeatDeliveryTarget(params: {
     return { channel: "none", reason: "no-target" };
   }
 
-  if (channel !== "whatsapp") {
-    return { channel, to };
-  }
-
-  const rawAllow = cfg.whatsapp?.allowFrom ?? [];
-  if (rawAllow.includes("*")) return { channel, to };
-  const allowFrom = rawAllow
-    .map((val) => normalizeE164(val))
-    .filter((val) => val.length > 1);
-  if (allowFrom.length === 0) return { channel, to };
-
-  const normalized = normalizeE164(to);
-  if (allowFrom.includes(normalized)) return { channel, to: normalized };
-  return { channel, to: allowFrom[0], reason: "allowFrom-fallback" };
+  return { channel, to };
 }
 
 async function restoreHeartbeatUpdatedAt(params: {
@@ -282,62 +227,25 @@ function normalizeHeartbeatReply(
 }
 
 async function deliverHeartbeatReply(params: {
-  channel: "whatsapp" | "telegram" | "discord";
+  channel: "telegram";
   to: string;
   text: string;
   mediaUrls: string[];
   textLimit: number;
-  deps: Required<
-    Pick<
-      HeartbeatDeps,
-      | "sendWhatsApp"
-      | "sendTelegram"
-      | "sendDiscord"
-    >
-  >;
+  deps: Required<Pick<HeartbeatDeps, "sendTelegram">>;
 }) {
-  const { channel, to, text, mediaUrls, deps, textLimit } = params;
-  if (channel === "whatsapp") {
-    if (mediaUrls.length === 0) {
-      for (const chunk of chunkText(text, textLimit)) {
-        await deps.sendWhatsApp(to, chunk, { verbose: false });
-      }
-      return;
-    }
-    let first = true;
-    for (const url of mediaUrls) {
-      const caption = first ? text : "";
-      first = false;
-      await deps.sendWhatsApp(to, caption, { verbose: false, mediaUrl: url });
-    }
-    return;
-  }
-
-  if (channel === "telegram") {
-    if (mediaUrls.length === 0) {
-      for (const chunk of chunkText(text, textLimit)) {
-        await deps.sendTelegram(to, chunk, { verbose: false });
-      }
-      return;
-    }
-    let first = true;
-    for (const url of mediaUrls) {
-      const caption = first ? text : "";
-      first = false;
-      await deps.sendTelegram(to, caption, { verbose: false, mediaUrl: url });
-    }
-    return;
-  }
-
+  const { to, text, mediaUrls, deps, textLimit } = params;
   if (mediaUrls.length === 0) {
-    await deps.sendDiscord(to, text, { verbose: false });
+    for (const chunk of chunkText(text, textLimit)) {
+      await deps.sendTelegram(to, chunk, { verbose: false });
+    }
     return;
   }
   let first = true;
   for (const url of mediaUrls) {
     const caption = first ? text : "";
     first = false;
-    await deps.sendDiscord(to, caption, { verbose: false, mediaUrl: url });
+    await deps.sendTelegram(to, caption, { verbose: false, mediaUrl: url });
   }
 }
 
@@ -362,9 +270,8 @@ export async function runHeartbeatOnce(opts: {
   const startedAt = opts.deps?.nowMs?.() ?? Date.now();
   const { entry, sessionKey, storePath } = resolveHeartbeatSession(cfg);
   const previousUpdatedAt = entry?.updatedAt;
-  const allowFrom = cfg.whatsapp?.allowFrom ?? [];
   const sender = resolveHeartbeatSender({
-    allowFrom,
+    allowFrom: [],
     lastTo: entry?.lastTo,
     lastChannel: entry?.lastChannel,
   });
@@ -437,31 +344,12 @@ export async function runHeartbeatOnce(opts: {
       return { status: "ran", durationMs: Date.now() - startedAt };
     }
 
-    if (delivery.channel === "whatsapp") {
-      const readiness = await resolveWhatsAppReadiness(cfg, opts.deps);
-      if (!readiness.ok) {
-        emitHeartbeatEvent({
-          status: "skipped",
-          reason: readiness.reason,
-          preview: normalized.text?.slice(0, 200),
-          durationMs: Date.now() - startedAt,
-          hasMedia: mediaUrls.length > 0,
-        });
-        log.info("heartbeat: whatsapp not ready", {
-          reason: readiness.reason,
-        });
-        return { status: "skipped", reason: readiness.reason };
-      }
-    }
-
     const deps = {
-      sendWhatsApp: opts.deps?.sendWhatsApp ?? sendMessageWhatsApp,
       sendTelegram: opts.deps?.sendTelegram ?? sendMessageTelegram,
-      sendDiscord: opts.deps?.sendDiscord ?? sendMessageDiscord,
     };
     const textLimit = resolveTextChunkLimit(cfg, delivery.channel);
     await deliverHeartbeatReply({
-      channel: delivery.channel,
+      channel: delivery.channel as "telegram",
       to: delivery.to,
       text: normalized.text,
       mediaUrls,

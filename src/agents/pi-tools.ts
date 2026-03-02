@@ -1,9 +1,7 @@
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { codingTools, readTool } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
 
 import { detectMime } from "../media/mime.js";
-import { startWebLoginWithQr, waitForWebLogin } from "../web/login-qr.js";
 import {
   type BashToolDefaults,
   createBashTool,
@@ -209,70 +207,6 @@ function normalizeToolParameters(tool: AnyAgentTool): AnyAgentTool {
   };
 }
 
-function createWhatsAppLoginTool(): AnyAgentTool {
-  return {
-    label: "WhatsApp Login",
-    name: "whatsapp_login",
-    description:
-      "Generate a WhatsApp QR code for linking, or wait for the scan to complete.",
-    parameters: Type.Object({
-      action: Type.Union([Type.Literal("start"), Type.Literal("wait")]),
-      timeoutMs: Type.Optional(Type.Number()),
-      force: Type.Optional(Type.Boolean()),
-    }),
-    execute: async (_toolCallId, args) => {
-      const action = (args as { action?: string })?.action ?? "start";
-      if (action === "wait") {
-        const result = await waitForWebLogin({
-          timeoutMs:
-            typeof (args as { timeoutMs?: unknown }).timeoutMs === "number"
-              ? (args as { timeoutMs?: number }).timeoutMs
-              : undefined,
-        });
-        return {
-          content: [{ type: "text", text: result.message }],
-          details: { connected: result.connected },
-        };
-      }
-
-      const result = await startWebLoginWithQr({
-        timeoutMs:
-          typeof (args as { timeoutMs?: unknown }).timeoutMs === "number"
-            ? (args as { timeoutMs?: number }).timeoutMs
-            : undefined,
-        force:
-          typeof (args as { force?: unknown }).force === "boolean"
-            ? (args as { force?: boolean }).force
-            : false,
-      });
-
-      if (!result.qrDataUrl) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: result.message,
-            },
-          ],
-          details: { qr: false },
-        };
-      }
-
-      const text = [
-        result.message,
-        "",
-        "Open WhatsApp → Linked Devices and scan:",
-        "",
-        `![whatsapp-qr](${result.qrDataUrl})`,
-      ].join("\n");
-      return {
-        content: [{ type: "text", text }],
-        details: { qr: true },
-      };
-    },
-  };
-}
-
 function createClawdisReadTool(base: AnyAgentTool): AnyAgentTool {
   return {
     ...base,
@@ -311,7 +245,6 @@ export function createClawdisCodingTools(options?: {
     ...base,
     bashTool as unknown as AnyAgentTool,
     processTool as unknown as AnyAgentTool,
-    createWhatsAppLoginTool(),
     ...createClawdisTools(),
   ];
   return tools.map(normalizeToolParameters);

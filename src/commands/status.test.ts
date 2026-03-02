@@ -15,21 +15,11 @@ const mocks = vi.hoisted(() => ({
     },
   }),
   resolveStorePath: vi.fn().mockReturnValue("/tmp/sessions.json"),
-  webAuthExists: vi.fn().mockResolvedValue(true),
-  getWebAuthAgeMs: vi.fn().mockReturnValue(5000),
-  readWebSelfId: vi.fn().mockReturnValue({ e164: "+1999" }),
-  logWebSelfId: vi.fn(),
 }));
 
 vi.mock("../config/sessions.js", () => ({
   loadSessionStore: mocks.loadSessionStore,
   resolveStorePath: mocks.resolveStorePath,
-}));
-vi.mock("../web/session.js", () => ({
-  webAuthExists: mocks.webAuthExists,
-  getWebAuthAgeMs: mocks.getWebAuthAgeMs,
-  readWebSelfId: mocks.readWebSelfId,
-  logWebSelfId: mocks.logWebSelfId,
 }));
 vi.mock("../config/config.js", () => ({
   loadConfig: () => ({ session: {} }),
@@ -46,8 +36,7 @@ const runtime = {
 describe("statusCommand", () => {
   it("prints JSON when requested", async () => {
     await statusCommand({ json: true }, runtime as never);
-    const payload = JSON.parse((runtime.log as vi.Mock).mock.calls[0][0]);
-    expect(payload.web.linked).toBe(true);
+    const payload = JSON.parse((runtime.log as ReturnType<typeof vi.fn>).mock.calls[0][0]);
     expect(payload.sessions.count).toBe(1);
     expect(payload.sessions.path).toBe("/tmp/sessions.json");
     expect(payload.sessions.defaults.model).toBeTruthy();
@@ -58,16 +47,15 @@ describe("statusCommand", () => {
   });
 
   it("prints formatted lines otherwise", async () => {
-    (runtime.log as vi.Mock).mockClear();
+    (runtime.log as ReturnType<typeof vi.fn>).mockClear();
     await statusCommand({}, runtime as never);
-    const logs = (runtime.log as vi.Mock).mock.calls.map((c) => String(c[0]));
-    expect(logs.some((l) => l.includes("Web session"))).toBe(true);
+    const logs = (runtime.log as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+    expect(logs.some((l) => l.includes("Session store"))).toBe(true);
     expect(logs.some((l) => l.includes("Active sessions"))).toBe(true);
     expect(logs.some((l) => l.includes("Default model"))).toBe(true);
     expect(logs.some((l) => l.includes("tokens:"))).toBe(true);
     expect(
       logs.some((l) => l.includes("flags:") && l.includes("verbose:on")),
     ).toBe(true);
-    expect(mocks.logWebSelfId).toHaveBeenCalled();
   });
 });

@@ -42,7 +42,6 @@ import {
 } from "../infra/agent-events.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { resolveTelegramToken } from "../telegram/token.js";
-import { normalizeE164 } from "../utils.js";
 
 type AgentCommandOpts = {
   message: string;
@@ -157,10 +156,6 @@ export async function agentCommand(
     ensureBootstrapFiles: true,
   });
   const workspaceDir = workspace.dir;
-
-  const allowFrom = (cfg.whatsapp?.allowFrom ?? [])
-    .map((val) => normalizeE164(val))
-    .filter((val) => val.length > 1);
 
   const thinkOverride = normalizeThinkLevel(opts.thinking);
   const thinkOnce = normalizeThinkLevel(opts.thinkingOnce);
@@ -420,57 +415,35 @@ export async function agentCommand(
   const payloads = result.payloads ?? [];
   const deliver = opts.deliver === true;
   const bestEffortDeliver = opts.bestEffortDeliver === true;
-  const deliveryProvider = (opts.provider ?? "whatsapp").toLowerCase();
+  const deliveryProvider = (opts.provider ?? "telegram").toLowerCase();
 
-  const whatsappTarget = opts.to ? normalizeE164(opts.to) : allowFrom[0];
   const telegramTarget = opts.to?.trim() || undefined;
-  const discordTarget = opts.to?.trim() || undefined;
 
   const logDeliveryError = (err: unknown) => {
     const deliveryTarget =
       deliveryProvider === "telegram"
         ? telegramTarget
-        : deliveryProvider === "whatsapp"
-          ? whatsappTarget
-          : deliveryProvider === "discord"
-            ? discordTarget
-            : undefined;
+        : undefined;
     const message = `Delivery failed (${deliveryProvider}${deliveryTarget ? ` to ${deliveryTarget}` : ""}): ${String(err)}`;
     runtime.error?.(message);
     if (!runtime.error) runtime.log(message);
   };
 
   if (deliver) {
-    if (deliveryProvider === "whatsapp" && !whatsappTarget) {
-      const err = new Error(
-        "Delivering to WhatsApp requires --to <E.164> or whatsapp.allowFrom[0]",
-      );
-      if (!bestEffortDeliver) throw err;
-      logDeliveryError(err);
-    }
     if (deliveryProvider === "telegram" && !telegramTarget) {
       const err = new Error("Delivering to Telegram requires --to <chatId>");
       if (!bestEffortDeliver) throw err;
       logDeliveryError(err);
     }
-    if (deliveryProvider === "discord" && !discordTarget) {
-      const err = new Error(
-        "Delivering to Discord requires --to <channelId|user:ID|channel:ID>",
-      );
-      if (!bestEffortDeliver) throw err;
-      logDeliveryError(err);
-    }
     if (deliveryProvider === "webchat") {
       const err = new Error(
-        "Delivering to WebChat is not supported via `clawdis agent`; use WhatsApp/Telegram or run with --deliver=false.",
+        "Delivering to WebChat is not supported via `clawdis agent`; use Telegram or run with --deliver=false.",
       );
       if (!bestEffortDeliver) throw err;
       logDeliveryError(err);
     }
     if (
-      deliveryProvider !== "whatsapp" &&
       deliveryProvider !== "telegram" &&
-      deliveryProvider !== "discord" &&
       deliveryProvider !== "webchat"
     ) {
       const err = new Error(`Unknown provider: ${deliveryProvider}`);
@@ -500,12 +473,10 @@ export async function agentCommand(
     return;
   }
 
-  const deliveryTextLimit =
-    deliveryProvider === "whatsapp" ||
-    deliveryProvider === "telegram" ||
-    deliveryProvider === "discord"
-      ? resolveTextChunkLimit(cfg, deliveryProvider)
-      : resolveTextChunkLimit(cfg, "whatsapp");
+  const deliveryTextLimit = resolveTextChunkLimit(
+    cfg,
+    deliveryProvider === "telegram" ? "telegram" : undefined,
+  );
 
   for (const payload of payloads) {
     const mediaList =
@@ -523,26 +494,6 @@ export async function agentCommand(
     const text = payload.text ?? "";
     const media = mediaList;
     if (!text && media.length === 0) continue;
-
-    if (deliveryProvider === "whatsapp" && whatsappTarget) {
-      try {
-        const primaryMedia = media[0];
-        await deps.sendMessageWhatsApp(whatsappTarget, text, {
-          verbose: false,
-          mediaUrl: primaryMedia,
-        });
-        for (const extra of media.slice(1)) {
-          await deps.sendMessageWhatsApp(whatsappTarget, "", {
-            verbose: false,
-            mediaUrl: extra,
-          });
-        }
-      } catch (err) {
-        if (!bestEffortDeliver) throw err;
-        logDeliveryError(err);
-      }
-      continue;
-    }
 
     if (deliveryProvider === "telegram" && telegramTarget) {
       try {
@@ -570,29 +521,5 @@ export async function agentCommand(
         logDeliveryError(err);
       }
     }
-
-    if (deliveryProvider === "discord" && discordTarget) {
-      try {
-        if (media.length === 0) {
-          await deps.sendMessageDiscord(discordTarget, text, {
-            token: process.env.DISCORD_BOT_TOKEN,
-          });
-        } else {
-          let first = true;
-          for (const url of media) {
-            const caption = first ? text : "";
-            first = false;
-            await deps.sendMessageDiscord(discordTarget, caption, {
-              token: process.env.DISCORD_BOT_TOKEN,
-              mediaUrl: url,
-            });
-          }
-        }
-      } catch (err) {
-        if (!bestEffortDeliver) throw err;
-        logDeliveryError(err);
-      }
-    }
-
   }
 }

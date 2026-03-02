@@ -6,9 +6,9 @@ import {
   type MediaKind,
   maxBytesForKind,
   mediaKindFromMime,
-} from "../media/constants.js";
-import { resizeToJpeg } from "../media/image-ops.js";
-import { detectMime, extensionForMime } from "../media/mime.js";
+} from "./constants.js";
+import { resizeToJpeg } from "./image-ops.js";
+import { detectMime, extensionForMime } from "./mime.js";
 
 export async function loadWebMedia(
   mediaUrl: string,

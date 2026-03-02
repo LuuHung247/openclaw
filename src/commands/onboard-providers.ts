@@ -1,37 +1,15 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-
-import { confirm, multiselect, note, select, text } from "@clack/prompts";
+import { confirm, multiselect, note, text } from "@clack/prompts";
 import chalk from "chalk";
 
 import type { ClawdisConfig } from "../config/config.js";
-import { loginWeb } from "../provider-web.js";
 import type { RuntimeEnv } from "../runtime.js";
-import { normalizeE164 } from "../utils.js";
-import { resolveWebAuthDir } from "../web/session.js";
 import { detectBinary, guardCancel } from "./onboard-helpers.js";
 import type { ProviderChoice } from "./onboard-types.js";
-
-async function pathExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function detectWhatsAppLinked(): Promise<boolean> {
-  const credsPath = path.join(resolveWebAuthDir(), "creds.json");
-  return await pathExists(credsPath);
-}
 
 function noteProviderPrimer(): void {
   note(
     [
-      "WhatsApp: links via WhatsApp Web (scan QR), stores creds for future sends.",
       "Telegram: Bot API (token from @BotFather), replies via your bot.",
-      "Discord: Bot token from Discord Developer Portal; invite bot to your server.",
       "iMessage: local imsg CLI (JSON-RPC over stdio) reading Messages DB.",
     ].join("\n"),
     "How providers work",
@@ -50,117 +28,15 @@ function noteTelegramTokenHelp(): void {
   );
 }
 
-function noteDiscordTokenHelp(): void {
-  note(
-    [
-      "1) Discord Developer Portal → Applications → New Application",
-      "2) Bot → Add Bot → Reset Token → copy token",
-      "3) OAuth2 → URL Generator → scope 'bot' → invite to your server",
-      "Tip: enable Message Content Intent if you need message text.",
-    ].join("\n"),
-    "Discord bot token",
-  );
-}
-
-function setWhatsAppAllowFrom(cfg: ClawdisConfig, allowFrom?: string[]) {
-  return {
-    ...cfg,
-    whatsapp: {
-      ...cfg.whatsapp,
-      allowFrom,
-    },
-  };
-}
-
-async function promptWhatsAppAllowFrom(
-  cfg: ClawdisConfig,
-  runtime: RuntimeEnv,
-): Promise<ClawdisConfig> {
-  const existingAllowFrom = cfg.whatsapp?.allowFrom ?? [];
-  const existingLabel =
-    existingAllowFrom.length > 0 ? existingAllowFrom.join(", ") : "unset";
-
-  note(
-    [
-      "WhatsApp direct chats are gated by `whatsapp.allowFrom`.",
-      'Default (unset) = self-chat only; use "*" to allow anyone.',
-      `Current: ${existingLabel}`,
-    ].join("\n"),
-    "WhatsApp allowlist",
-  );
-
-  const options =
-    existingAllowFrom.length > 0
-      ? ([
-          { value: "keep", label: "Keep current" },
-          { value: "self", label: "Self-chat only (unset)" },
-          { value: "list", label: "Specific numbers (recommended)" },
-          { value: "any", label: "Anyone (*)" },
-        ] as const)
-      : ([
-          { value: "self", label: "Self-chat only (default)" },
-          { value: "list", label: "Specific numbers (recommended)" },
-          { value: "any", label: "Anyone (*)" },
-        ] as const);
-
-  const mode = guardCancel(
-    await select({
-      message: "Who can trigger the bot via WhatsApp?",
-      options: options.map((opt) => ({ value: opt.value, label: opt.label })),
-    }),
-    runtime,
-  ) as (typeof options)[number]["value"];
-
-  if (mode === "keep") return cfg;
-  if (mode === "self") return setWhatsAppAllowFrom(cfg, undefined);
-  if (mode === "any") return setWhatsAppAllowFrom(cfg, ["*"]);
-
-  const allowRaw = guardCancel(
-    await text({
-      message: "Allowed sender numbers (comma-separated, E.164)",
-      placeholder: "+15555550123, +447700900123",
-      validate: (value) => {
-        const raw = String(value ?? "").trim();
-        if (!raw) return "Required";
-        const parts = raw
-          .split(/[\n,;]+/g)
-          .map((p) => p.trim())
-          .filter(Boolean);
-        if (parts.length === 0) return "Required";
-        for (const part of parts) {
-          if (part === "*") continue;
-          const normalized = normalizeE164(part);
-          if (!normalized) return `Invalid number: ${part}`;
-        }
-        return undefined;
-      },
-    }),
-    runtime,
-  );
-
-  const parts = String(allowRaw)
-    .split(/[\n,;]+/g)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  const normalized = parts.map((part) =>
-    part === "*" ? "*" : normalizeE164(part),
-  );
-  const unique = [...new Set(normalized.filter(Boolean))];
-  return setWhatsAppAllowFrom(cfg, unique);
-}
-
 export async function setupProviders(
   cfg: ClawdisConfig,
   runtime: RuntimeEnv,
   options?: { allowDisable?: boolean },
 ): Promise<ClawdisConfig> {
-  const whatsappLinked = await detectWhatsAppLinked();
   const telegramEnv = Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim());
-  const discordEnv = Boolean(process.env.DISCORD_BOT_TOKEN?.trim());
   const telegramConfigured = Boolean(
     telegramEnv || cfg.telegram?.botToken || cfg.telegram?.tokenFile,
   );
-  const discordConfigured = Boolean(discordEnv || cfg.discord?.token);
   const imessageConfigured = Boolean(
     cfg.imessage?.cliPath || cfg.imessage?.dbPath || cfg.imessage?.allowFrom,
   );
@@ -169,16 +45,8 @@ export async function setupProviders(
 
   note(
     [
-      `WhatsApp: ${
-        whatsappLinked ? chalk.green("linked") : chalk.red("not linked")
-      }`,
       `Telegram: ${
         telegramConfigured
-          ? chalk.green("configured")
-          : chalk.yellow("needs token")
-      }`,
-      `Discord: ${
-        discordConfigured
           ? chalk.green("configured")
           : chalk.yellow("needs token")
       }`,
@@ -210,19 +78,9 @@ export async function setupProviders(
       message: "Select providers",
       options: [
         {
-          value: "whatsapp",
-          label: "WhatsApp (QR link)",
-          hint: whatsappLinked ? "linked" : "not linked",
-        },
-        {
           value: "telegram",
           label: "Telegram (Bot API)",
           hint: telegramConfigured ? "configured" : "needs token",
-        },
-        {
-          value: "discord",
-          label: "Discord (Bot API)",
-          hint: discordConfigured ? "configured" : "needs token",
         },
         {
           value: "imessage",
@@ -235,38 +93,6 @@ export async function setupProviders(
   ) as ProviderChoice[];
 
   let next = cfg;
-
-  if (selection.includes("whatsapp")) {
-    if (!whatsappLinked) {
-      note(
-        [
-          "Scan the QR with WhatsApp on your phone.",
-          "Credentials are stored under ~/.clawdis/credentials/ for future runs.",
-        ].join("\n"),
-        "WhatsApp linking",
-      );
-    }
-    const wantsLink = guardCancel(
-      await confirm({
-        message: whatsappLinked
-          ? "WhatsApp already linked. Re-link now?"
-          : "Link WhatsApp now (QR)?",
-        initialValue: !whatsappLinked,
-      }),
-      runtime,
-    );
-    if (wantsLink) {
-      try {
-        await loginWeb(false, "web");
-      } catch (err) {
-        runtime.error(`WhatsApp login failed: ${String(err)}`);
-      }
-    } else if (!whatsappLinked) {
-      note("Run `clawdis login` later to link WhatsApp.", "WhatsApp");
-    }
-
-    next = await promptWhatsAppAllowFrom(next, runtime);
-  }
 
   if (selection.includes("telegram")) {
     let token: string | null = null;
@@ -343,81 +169,6 @@ export async function setupProviders(
     }
   }
 
-  if (selection.includes("discord")) {
-    let token: string | null = null;
-    if (!discordConfigured) {
-      noteDiscordTokenHelp();
-    }
-    if (discordEnv && !cfg.discord?.token) {
-      const keepEnv = guardCancel(
-        await confirm({
-          message: "DISCORD_BOT_TOKEN detected. Use env var?",
-          initialValue: true,
-        }),
-        runtime,
-      );
-      if (keepEnv) {
-        next = {
-          ...next,
-          discord: {
-            ...next.discord,
-            enabled: true,
-          },
-        };
-      } else {
-        token = String(
-          guardCancel(
-            await text({
-              message: "Enter Discord bot token",
-              validate: (value) => (value?.trim() ? undefined : "Required"),
-            }),
-            runtime,
-          ),
-        ).trim();
-      }
-    } else if (cfg.discord?.token) {
-      const keep = guardCancel(
-        await confirm({
-          message: "Discord token already configured. Keep it?",
-          initialValue: true,
-        }),
-        runtime,
-      );
-      if (!keep) {
-        token = String(
-          guardCancel(
-            await text({
-              message: "Enter Discord bot token",
-              validate: (value) => (value?.trim() ? undefined : "Required"),
-            }),
-            runtime,
-          ),
-        ).trim();
-      }
-    } else {
-      token = String(
-        guardCancel(
-          await text({
-            message: "Enter Discord bot token",
-            validate: (value) => (value?.trim() ? undefined : "Required"),
-          }),
-          runtime,
-        ),
-      ).trim();
-    }
-
-    if (token) {
-      next = {
-        ...next,
-        discord: {
-          ...next.discord,
-          enabled: true,
-          token,
-        },
-      };
-    }
-  }
-
   if (selection.includes("imessage")) {
     let resolvedCliPath = imessageCliPath;
     if (!imessageCliDetected) {
@@ -469,22 +220,6 @@ export async function setupProviders(
         next = {
           ...next,
           telegram: { ...next.telegram, enabled: false },
-        };
-      }
-    }
-
-    if (!selection.includes("discord") && discordConfigured) {
-      const disable = guardCancel(
-        await confirm({
-          message: "Disable Discord provider?",
-          initialValue: false,
-        }),
-        runtime,
-      );
-      if (disable) {
-        next = {
-          ...next,
-          discord: { ...next.discord, enabled: false },
         };
       }
     }

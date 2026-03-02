@@ -17,7 +17,7 @@ export async function sendCommand(
   deps: CliDeps,
   runtime: RuntimeEnv,
 ) {
-  const provider = (opts.provider ?? "whatsapp").toLowerCase();
+  const provider = (opts.provider ?? "telegram").toLowerCase();
 
   if (opts.dryRun) {
     runtime.log(
@@ -45,35 +45,6 @@ export async function sendCommand(
             via: "direct",
             to: opts.to,
             chatId: result.chatId,
-            messageId: result.messageId,
-            mediaUrl: opts.media ?? null,
-          },
-          null,
-          2,
-        ),
-      );
-    }
-    return;
-  }
-
-  if (provider === "discord") {
-    const result = await deps.sendMessageDiscord(opts.to, opts.message, {
-      token: process.env.DISCORD_BOT_TOKEN,
-      mediaUrl: opts.media,
-    });
-    runtime.log(
-      success(
-        `✅ Sent via discord. Message ID: ${result.messageId} (channel ${result.channelId})`,
-      ),
-    );
-    if (opts.json) {
-      runtime.log(
-        JSON.stringify(
-          {
-            provider: "discord",
-            via: "direct",
-            to: opts.to,
-            channelId: result.channelId,
             messageId: result.messageId,
             mediaUrl: opts.media ?? null,
           },

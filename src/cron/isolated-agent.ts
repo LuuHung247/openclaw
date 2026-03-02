@@ -26,7 +26,6 @@ import {
 } from "../config/sessions.js";
 import { registerAgentRunContext } from "../infra/agent-events.js";
 import { resolveTelegramToken } from "../telegram/token.js";
-import { normalizeE164 } from "../utils.js";
 import type { CronJob } from "./types.js";
 
 export type RunCronAgentTurnResult = {
@@ -57,9 +56,7 @@ function resolveDeliveryTarget(
   jobPayload: {
     channel?:
       | "last"
-      | "whatsapp"
-      | "telegram"
-      | "discord";
+      | "telegram";
     to?: string;
   },
 ) {
@@ -80,22 +77,16 @@ function resolveDeliveryTarget(
       ? main.lastChannel
       : undefined;
   const lastChannel =
-    lastChannelRaw === "whatsapp" ||
-    lastChannelRaw === "telegram" ||
-    lastChannelRaw === "discord"
+    lastChannelRaw === "telegram"
       ? lastChannelRaw
       : undefined;
   const lastTo = typeof main?.lastTo === "string" ? main.lastTo.trim() : "";
 
   const channel = (() => {
-    if (
-      requestedChannel === "whatsapp" ||
-      requestedChannel === "telegram" ||
-      requestedChannel === "discord"
-    ) {
+    if (requestedChannel === "telegram") {
       return requestedChannel;
     }
-    return lastChannel ?? "whatsapp";
+    return lastChannel ?? "telegram";
   })();
 
   const to = (() => {
@@ -103,23 +94,9 @@ function resolveDeliveryTarget(
     return lastTo || undefined;
   })();
 
-  const sanitizedWhatsappTo = (() => {
-    if (channel !== "whatsapp") return to;
-    const rawAllow = cfg.whatsapp?.allowFrom ?? [];
-    if (rawAllow.includes("*")) return to;
-    const allowFrom = rawAllow
-      .map((val) => normalizeE164(val))
-      .filter((val) => val.length > 1);
-    if (allowFrom.length === 0) return to;
-    if (!to) return allowFrom[0];
-    const normalized = normalizeE164(to);
-    if (allowFrom.includes(normalized)) return normalized;
-    return allowFrom[0];
-  })();
-
   return {
     channel,
-    to: channel === "whatsapp" ? sanitizedWhatsappTo : to,
+    to,
   };
 }
 
@@ -310,42 +287,7 @@ export async function runCronIsolatedAgentTurn(params: {
     pickSummaryFromPayloads(payloads) ?? pickSummaryFromOutput(firstText);
 
   if (delivery) {
-    if (resolvedDelivery.channel === "whatsapp") {
-      if (!resolvedDelivery.to) {
-        if (!bestEffortDeliver)
-          return {
-            status: "error",
-            summary,
-            error: "Cron delivery to WhatsApp requires a recipient.",
-          };
-        return {
-          status: "skipped",
-          summary: "Delivery skipped (no WhatsApp recipient).",
-        };
-      }
-      const to = normalizeE164(resolvedDelivery.to);
-      try {
-        for (const payload of payloads) {
-          const mediaList =
-            payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []);
-          const primaryMedia = mediaList[0];
-          await params.deps.sendMessageWhatsApp(to, payload.text ?? "", {
-            verbose: false,
-            mediaUrl: primaryMedia,
-          });
-          for (const extra of mediaList.slice(1)) {
-            await params.deps.sendMessageWhatsApp(to, "", {
-              verbose: false,
-              mediaUrl: extra,
-            });
-          }
-        }
-      } catch (err) {
-        if (!bestEffortDeliver)
-          return { status: "error", summary, error: String(err) };
-        return { status: "ok", summary };
-      }
-    } else if (resolvedDelivery.channel === "telegram") {
+    if (resolvedDelivery.channel === "telegram") {
       if (!resolvedDelivery.to) {
         if (!bestEffortDeliver)
           return {
@@ -380,50 +322,6 @@ export async function runCronIsolatedAgentTurn(params: {
                 verbose: false,
                 mediaUrl: url,
                 token: telegramToken || undefined,
-              });
-            }
-          }
-        }
-      } catch (err) {
-        if (!bestEffortDeliver)
-          return { status: "error", summary, error: String(err) };
-        return { status: "ok", summary };
-      }
-    } else if (resolvedDelivery.channel === "discord") {
-      if (!resolvedDelivery.to) {
-        if (!bestEffortDeliver)
-          return {
-            status: "error",
-            summary,
-            error:
-              "Cron delivery to Discord requires --channel discord and --to <channelId|user:ID>",
-          };
-        return {
-          status: "skipped",
-          summary: "Delivery skipped (no Discord destination).",
-        };
-      }
-      const discordTarget = resolvedDelivery.to;
-      try {
-        for (const payload of payloads) {
-          const mediaList =
-            payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []);
-          if (mediaList.length === 0) {
-            await params.deps.sendMessageDiscord(
-              discordTarget,
-              payload.text ?? "",
-              {
-                token: process.env.DISCORD_BOT_TOKEN,
-              },
-            );
-          } else {
-            let first = true;
-            for (const url of mediaList) {
-              const caption = first ? (payload.text ?? "") : "";
-              first = false;
-              await params.deps.sendMessageDiscord(discordTarget, caption, {
-                token: process.env.DISCORD_BOT_TOKEN,
-                mediaUrl: url,
               });
             }
           }

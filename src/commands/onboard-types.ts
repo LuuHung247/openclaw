@@ -11,9 +11,7 @@ export type GatewayBind = "loopback" | "lan" | "tailnet" | "auto";
 export type TailscaleMode = "off" | "serve" | "funnel";
 export type NodeManagerChoice = "npm" | "pnpm" | "bun";
 export type ProviderChoice =
-  | "whatsapp"
   | "telegram"
-  | "discord"
   | "imessage";
 
 export type OnboardOptions = {

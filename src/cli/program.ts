@@ -12,7 +12,6 @@ import { statusCommand } from "../commands/status.js";
 import { updateCommand } from "../commands/update.js";
 import { readConfigFileSnapshot } from "../config/config.js";
 import { danger, setVerbose } from "../globals.js";
-import { loginWeb, logoutWeb } from "../provider-web.js";
 import { defaultRuntime } from "../runtime.js";
 import { VERSION } from "../version.js";
 import { registerBrowserCli } from "./browser-cli.js";
@@ -268,36 +267,6 @@ export function buildProgram() {
     });
 
   program
-    .command("login")
-    .description("Link your personal WhatsApp via QR (web provider)")
-    .option("--verbose", "Verbose connection logs", false)
-    .option("--provider <provider>", "Provider alias (default: whatsapp)")
-    .action(async (opts) => {
-      setVerbose(Boolean(opts.verbose));
-      try {
-        const provider = opts.provider ?? "whatsapp";
-        await loginWeb(Boolean(opts.verbose), provider);
-      } catch (err) {
-        defaultRuntime.error(danger(`Web login failed: ${String(err)}`));
-        defaultRuntime.exit(1);
-      }
-    });
-
-  program
-    .command("logout")
-    .description("Clear cached WhatsApp Web credentials")
-    .option("--provider <provider>", "Provider alias (default: whatsapp)")
-    .action(async (opts) => {
-      try {
-        void opts.provider; // placeholder for future multi-provider; currently web only.
-        await logoutWeb(defaultRuntime);
-      } catch (err) {
-        defaultRuntime.error(danger(`Logout failed: ${String(err)}`));
-        defaultRuntime.exit(1);
-      }
-    });
-
-  program
     .command("send")
     .description(
       "Send a message (WhatsApp Web, Telegram bot, Discord, iMessage)",
@@ -313,7 +282,7 @@ export function buildProgram() {
     )
     .option(
       "--provider <provider>",
-      "Delivery provider: whatsapp|telegram|discord|imessage (default: whatsapp)",
+      "Delivery provider: telegram (default: telegram)",
     )
     .option("--dry-run", "Print payload and skip sending", false)
     .option("--json", "Output result as JSON", false)
@@ -356,7 +325,7 @@ Examples:
     .option("--verbose <on|off>", "Persist agent verbose level for the session")
     .option(
       "--provider <provider>",
-      "Delivery provider: whatsapp|telegram|discord|imessage (default: whatsapp)",
+      "Delivery provider: telegram (default: telegram)",
     )
     .option(
       "--deliver",

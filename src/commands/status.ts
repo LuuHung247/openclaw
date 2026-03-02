@@ -16,12 +16,6 @@ import { info } from "../globals.js";
 import { buildProviderSummary } from "../infra/provider-summary.js";
 import { peekSystemEvents } from "../infra/system-events.js";
 import type { RuntimeEnv } from "../runtime.js";
-import { resolveHeartbeatSeconds } from "../web/reconnect.js";
-import {
-  getWebAuthAgeMs,
-  logWebSelfId,
-  webAuthExists,
-} from "../web/session.js";
 import type { HealthSummary } from "./health.js";
 
 export type SessionStatus = {
@@ -45,8 +39,6 @@ export type SessionStatus = {
 };
 
 export type StatusSummary = {
-  web: { linked: boolean; authAgeMs: number | null };
-  heartbeatSeconds: number;
   providerSummary: string[];
   queuedSystemEvents: string[];
   sessions: {
@@ -59,9 +51,6 @@ export type StatusSummary = {
 
 export async function getStatusSummary(): Promise<StatusSummary> {
   const cfg = loadConfig();
-  const linked = await webAuthExists();
-  const authAgeMs = getWebAuthAgeMs();
-  const heartbeatSeconds = resolveHeartbeatSeconds(cfg, undefined);
   const providerSummary = await buildProviderSummary(cfg);
   const queuedSystemEvents = peekSystemEvents();
 
@@ -124,8 +113,6 @@ export async function getStatusSummary(): Promise<StatusSummary> {
   const recent = sessions.slice(0, 5);
 
   return {
-    web: { linked, authAgeMs },
-    heartbeatSeconds,
     providerSummary,
     queuedSystemEvents,
     sessions: {
@@ -221,12 +208,6 @@ export async function statusCommand(
     return;
   }
 
-  runtime.log(
-    `Web session: ${summary.web.linked ? "linked" : "not linked"}${summary.web.linked ? ` (last refreshed ${formatAge(summary.web.authAgeMs)})` : ""}`,
-  );
-  if (summary.web.linked) {
-    logWebSelfId(runtime, true);
-  }
   runtime.log(info("System:"));
   for (const line of summary.providerSummary) {
     runtime.log(`  ${line}`);
@@ -245,15 +226,6 @@ export async function statusCommand(
         : `Telegram: failed (${health.telegram.probe?.status ?? "unknown"})${health.telegram.probe?.error ? ` - ${health.telegram.probe.error}` : ""}`
       : info("Telegram: not configured");
     runtime.log(tgLine);
-
-    const discordLine = health.discord.configured
-      ? health.discord.probe?.ok
-        ? info(
-            `Discord: ok${health.discord.probe.bot?.username ? ` (@${health.discord.probe.bot.username})` : ""} (${health.discord.probe.elapsedMs}ms)`,
-          )
-        : `Discord: failed (${health.discord.probe?.status ?? "unknown"})${health.discord.probe?.error ? ` - ${health.discord.probe.error}` : ""}`
-      : info("Discord: not configured");
-    runtime.log(discordLine);
   } else {
     runtime.log(info("Provider probes: skipped (use --deep)"));
   }
@@ -265,7 +237,6 @@ export async function statusCommand(
       ),
     );
   }
-  runtime.log(info(`Heartbeat: ${summary.heartbeatSeconds}s`));
   runtime.log(info(`Session store: ${summary.sessions.path}`));
   const defaults = summary.sessions.defaults;
   const defaultCtx = defaults.contextTokens

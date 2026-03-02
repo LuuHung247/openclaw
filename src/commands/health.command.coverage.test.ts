@@ -4,16 +4,9 @@ import type { HealthSummary } from "./health.js";
 import { healthCommand } from "./health.js";
 
 const callGatewayMock = vi.fn();
-const logWebSelfIdMock = vi.fn();
 
 vi.mock("../gateway/call.js", () => ({
   callGateway: (...args: unknown[]) => callGatewayMock(...args),
-}));
-
-vi.mock("../web/session.js", () => ({
-  webAuthExists: vi.fn(async () => true),
-  getWebAuthAgeMs: vi.fn(() => 0),
-  logWebSelfId: (...args: unknown[]) => logWebSelfIdMock(...args),
 }));
 
 describe("healthCommand (coverage)", () => {
@@ -32,11 +25,6 @@ describe("healthCommand (coverage)", () => {
       ok: true,
       ts: Date.now(),
       durationMs: 5,
-      web: {
-        linked: true,
-        authAgeMs: 5 * 60_000,
-        connect: { ok: true, status: 200, elapsedMs: 10 },
-      },
       telegram: {
         configured: true,
         probe: {
@@ -46,10 +34,6 @@ describe("healthCommand (coverage)", () => {
           webhook: { url: "https://example.com/h" },
         },
       },
-      discord: {
-        configured: false,
-      },
-      heartbeatSeconds: 60,
       sessions: {
         path: "/tmp/sessions.json",
         count: 2,
@@ -64,8 +48,7 @@ describe("healthCommand (coverage)", () => {
 
     expect(runtime.exit).not.toHaveBeenCalled();
     expect(runtime.log.mock.calls.map((c) => String(c[0])).join("\n")).toMatch(
-      /Web: linked/i,
+      /Telegram: ok/i,
     );
-    expect(logWebSelfIdMock).toHaveBeenCalled();
   });
 });

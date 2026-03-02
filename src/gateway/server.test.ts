@@ -123,7 +123,6 @@ vi.mock("../infra/tailnet.js", () => ({
 }));
 
 let testSessionStorePath: string | undefined;
-let testAllowFrom: string[] | undefined;
 let testCronStorePath: string | undefined;
 let testCronEnabled: boolean | undefined = false;
 let testGatewayBind: "auto" | "lan" | "tailnet" | "loopback" | undefined;
@@ -235,9 +234,6 @@ vi.mock("../config/config.js", () => {
         model: "anthropic/claude-opus-4-5",
         workspace: path.join(os.tmpdir(), "clawd-gateway-test"),
       },
-      whatsapp: {
-        allowFrom: testAllowFrom,
-      },
       session: { mainKey: "main", store: testSessionStorePath },
       gateway: (() => {
         const gateway: Record<string, unknown> = {};
@@ -284,13 +280,13 @@ vi.mock("../commands/health.js", () => ({
 vi.mock("../commands/status.js", () => ({
   getStatusSummary: vi.fn().mockResolvedValue({ ok: true }),
 }));
-vi.mock("../web/outbound.js", () => ({
-  sendMessageWhatsApp: vi
-    .fn()
-    .mockResolvedValue({ messageId: "msg-1", toJid: "jid-1" }),
-}));
 vi.mock("../commands/agent.js", () => ({
   agentCommand: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../telegram/send.js", () => ({
+  sendMessageTelegram: vi
+    .fn()
+    .mockResolvedValue({ messageId: "tg-msg-1", chatId: "+15550000000" }),
 }));
 
 process.env.CLAWDIS_SKIP_PROVIDERS = "1";
@@ -1773,8 +1769,7 @@ describe("gateway server", () => {
     await server.close();
   });
 
-  test("agent falls back to allowFrom when lastTo is stale", async () => {
-    testAllowFrom = ["+436769770569"];
+  test("agent normalises legacy whatsapp lastChannel to telegram", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdis-gw-"));
     testSessionStorePath = path.join(dir, "sessions.json");
     await fs.writeFile(
@@ -1819,17 +1814,16 @@ describe("gateway server", () => {
     const spy = vi.mocked(agentCommand);
     expect(spy).toHaveBeenCalled();
     const call = spy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
-    expect(call.provider).toBe("whatsapp");
-    expect(call.to).toBe("+436769770569");
+    // Legacy "whatsapp" lastChannel is normalised to "telegram"
+    expect(call.provider).toBe("telegram");
+    expect(call.to).toBe("+1555");
     expect(call.sessionId).toBe("sess-main-stale");
 
     ws.close();
     await server.close();
-    testAllowFrom = undefined;
   });
 
-  test("agent routes main last-channel whatsapp", async () => {
-    testAllowFrom = undefined;
+  test("agent normalises legacy whatsapp lastChannel with lastTo to telegram", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdis-gw-"));
     testSessionStorePath = path.join(dir, "sessions.json");
     await fs.writeFile(
@@ -1874,7 +1868,8 @@ describe("gateway server", () => {
     const spy = vi.mocked(agentCommand);
     expect(spy).toHaveBeenCalled();
     const call = spy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
-    expect(call.provider).toBe("whatsapp");
+    // Legacy "whatsapp" lastChannel is normalised to "telegram"
+    expect(call.provider).toBe("telegram");
     expect(call.to).toBe("+1555");
     expect(call.deliver).toBe(true);
     expect(call.bestEffortDeliver).toBe(true);
@@ -1936,7 +1931,7 @@ describe("gateway server", () => {
     await server.close();
   });
 
-  test("agent routes main last-channel discord", async () => {
+  test("agent normalises legacy discord lastChannel to telegram", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdis-gw-"));
     testSessionStorePath = path.join(dir, "sessions.json");
     await fs.writeFile(
@@ -1981,7 +1976,9 @@ describe("gateway server", () => {
     const spy = vi.mocked(agentCommand);
     expect(spy).toHaveBeenCalled();
     const call = spy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
-    expect(call.provider).toBe("discord");
+    // Legacy "discord" lastChannel is normalised to "telegram"
+    expect(call.provider).toBe("telegram");
+    // lastTo is passed through since resolvedChannel is now "telegram"
     expect(call.to).toBe("channel:discord-123");
     expect(call.deliver).toBe(true);
     expect(call.bestEffortDeliver).toBe(true);
@@ -1992,7 +1989,6 @@ describe("gateway server", () => {
   });
 
   test("agent ignores webchat last-channel for routing", async () => {
-    testAllowFrom = ["+1555"];
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdis-gw-"));
     testSessionStorePath = path.join(dir, "sessions.json");
     await fs.writeFile(
@@ -2034,7 +2030,8 @@ describe("gateway server", () => {
     const spy = vi.mocked(agentCommand);
     expect(spy).toHaveBeenCalled();
     const call = spy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
-    expect(call.provider).toBe("whatsapp");
+    // WebChat is not a deliverable surface; routes to telegram
+    expect(call.provider).toBe("telegram");
     expect(call.to).toBe("+1555");
     expect(call.deliver).toBe(true);
     expect(call.bestEffortDeliver).toBe(true);
@@ -2044,35 +2041,6 @@ describe("gateway server", () => {
     await server.close();
   });
 
-  test("hello-ok advertises the gateway port for canvas host", async () => {
-    const prevToken = process.env.CLAWDIS_GATEWAY_TOKEN;
-    process.env.CLAWDIS_GATEWAY_TOKEN = "secret";
-    testTailnetIPv4.value = "100.64.0.1";
-    testGatewayBind = "lan";
-    const canvasPort = await getFreePort();
-    testCanvasHostPort = canvasPort;
-
-    const port = await getFreePort();
-    const server = await startGatewayServer(port, {
-      bind: "lan",
-      allowCanvasHostInTests: true,
-    });
-    const ws = new WebSocket(`ws://127.0.0.1:${port}`, {
-      headers: { Host: `100.64.0.1:${port}` },
-    });
-    await new Promise<void>((resolve) => ws.once("open", resolve));
-
-    const hello = await connectOk(ws, { token: "secret" });
-    expect(hello.canvasHostUrl).toBe(`http://100.64.0.1:${canvasPort}`);
-
-    ws.close();
-    await server.close();
-    if (prevToken === undefined) {
-      delete process.env.CLAWDIS_GATEWAY_TOKEN;
-    } else {
-      process.env.CLAWDIS_GATEWAY_TOKEN = prevToken;
-    }
-  });
 
   test("rejects protocol mismatch", async () => {
     const { server, ws } = await startServerWithClient();
@@ -2250,28 +2218,19 @@ describe("gateway server", () => {
     await connectOk(ws);
 
     const res = await rpcReq<{
-      whatsapp?: { linked?: boolean };
       telegram?: {
         configured?: boolean;
         tokenSource?: string;
         probe?: unknown;
         lastProbeAt?: unknown;
       };
-      signal?: {
-        configured?: boolean;
-        probe?: unknown;
-        lastProbeAt?: unknown;
-      };
     }>(ws, "providers.status", { probe: false, timeoutMs: 2000 });
     expect(res.ok).toBe(true);
-    expect(res.payload?.whatsapp).toBeTruthy();
+    expect(res.payload?.telegram).toBeTruthy();
     expect(res.payload?.telegram?.configured).toBe(false);
     expect(res.payload?.telegram?.tokenSource).toBe("none");
     expect(res.payload?.telegram?.probe).toBeUndefined();
     expect(res.payload?.telegram?.lastProbeAt).toBeNull();
-    expect(res.payload?.signal?.configured).toBe(false);
-    expect(res.payload?.signal?.probe).toBeUndefined();
-    expect(res.payload?.signal?.lastProbeAt).toBeNull();
 
     ws.close();
     await server.close();
@@ -2280,18 +2239,6 @@ describe("gateway server", () => {
     } else {
       process.env.TELEGRAM_BOT_TOKEN = prevToken;
     }
-  });
-
-  test("web.logout reports no session when missing", async () => {
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
-    const res = await rpcReq<{ cleared?: boolean }>(ws, "web.logout");
-    expect(res.ok).toBe(true);
-    expect(res.payload?.cleared).toBe(false);
-
-    ws.close();
-    await server.close();
   });
 
   test("telegram.logout clears bot token from config", async () => {
@@ -3689,74 +3636,6 @@ describe("gateway server", () => {
     await server.close();
   });
 
-  test("agent events stream to webchat clients when run context is registered", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdis-gw-"));
-    testSessionStorePath = path.join(dir, "sessions.json");
-    await fs.writeFile(
-      testSessionStorePath,
-      JSON.stringify(
-        {
-          main: {
-            sessionId: "sess-main",
-            updatedAt: Date.now(),
-          },
-        },
-        null,
-        2,
-      ),
-      "utf-8",
-    );
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws, {
-      client: {
-        name: "webchat",
-        version: "1.0.0",
-        platform: "test",
-        mode: "webchat",
-      },
-    });
-
-    registerAgentRunContext("run-auto-1", { sessionKey: "main" });
-
-    const finalChatP = onceMessage<{
-      type: "event";
-      event: string;
-      payload?: unknown;
-    }>(
-      ws,
-      (o) => {
-        if (o.type !== "event" || o.event !== "chat") return false;
-        const payload = o.payload as
-          | { state?: unknown; runId?: unknown }
-          | undefined;
-        return payload?.state === "final" && payload.runId === "run-auto-1";
-      },
-      8000,
-    );
-
-    emitAgentEvent({
-      runId: "run-auto-1",
-      stream: "assistant",
-      data: { text: "hi from agent" },
-    });
-    emitAgentEvent({
-      runId: "run-auto-1",
-      stream: "job",
-      data: { state: "done" },
-    });
-
-    const evt = await finalChatP;
-    const payload =
-      evt.payload && typeof evt.payload === "object"
-        ? (evt.payload as Record<string, unknown>)
-        : {};
-    expect(payload.sessionKey).toBe("main");
-    expect(payload.runId).toBe("run-auto-1");
-
-    ws.close();
-    await server.close();
-  });
 
   test("bridge chat.abort cancels while saving the session store", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdis-gw-"));

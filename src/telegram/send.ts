@@ -2,7 +2,7 @@
 import { Bot, InputFile } from "grammy";
 import { formatErrorMessage } from "../infra/errors.js";
 import { mediaKindFromMime } from "../media/constants.js";
-import { loadWebMedia } from "../web/media.js";
+import { loadWebMedia } from "../media/fetch.js";
 
 type TelegramSendOpts = {
   token?: string;

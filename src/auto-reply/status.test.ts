@@ -29,17 +29,12 @@ describe("buildStatusMessage", () => {
       resolvedThink: "medium",
       resolvedVerbose: "off",
       now: 10 * 60_000, // 10 minutes later
-      webLinked: true,
-      webAuthAgeMs: 5 * 60_000,
-      heartbeatSeconds: 45,
     });
 
     expect(text).toContain("⚙️ Status");
     expect(text).toContain("Agent: embedded pi");
     expect(text).toContain("Context: 16k/32k (50%)");
     expect(text).toContain("Session: main");
-    expect(text).toContain("Web: linked");
-    expect(text).toContain("heartbeat 45s");
     expect(text).toContain("thinking=medium");
     expect(text).toContain("verbose=off");
   });
@@ -48,12 +43,10 @@ describe("buildStatusMessage", () => {
     const text = buildStatusMessage({
       agent: {},
       sessionScope: "per-sender",
-      webLinked: false,
     });
 
     expect(text).toContain("Agent: embedded pi");
     expect(text).toContain("Context:");
-    expect(text).toContain("Web: not linked");
   });
 
   it("includes group activation for group sessions", () => {
@@ -67,7 +60,6 @@ describe("buildStatusMessage", () => {
       },
       sessionKey: "whatsapp:group:123@g.us",
       sessionScope: "per-sender",
-      webLinked: true,
     });
 
     expect(text).toContain("Group activation: always");
@@ -128,7 +120,6 @@ describe("buildStatusMessage", () => {
         sessionKey: "main",
         sessionScope: "per-sender",
         storePath,
-        webLinked: true,
       });
 
       expect(text).toContain("Context: 1.0k/32k");

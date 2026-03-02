@@ -34,9 +34,6 @@ type StatusArgs = {
   resolvedThink?: ThinkLevel;
   resolvedVerbose?: VerboseLevel;
   now?: number;
-  webLinked?: boolean;
-  webAuthAgeMs?: number | null;
-  heartbeatSeconds?: number;
 };
 
 const formatAge = (ms?: number | null) => {
@@ -169,18 +166,6 @@ export function buildStatusMessage(args: StatusArgs): string {
   const verboseLevel =
     args.resolvedVerbose ?? args.agent?.verboseDefault ?? "off";
 
-  const webLine = (() => {
-    if (args.webLinked === false) {
-      return "Web: not linked — run `clawdis login` to scan the QR.";
-    }
-    const authAge = formatAge(args.webAuthAgeMs);
-    const heartbeat =
-      typeof args.heartbeatSeconds === "number"
-        ? ` • heartbeat ${args.heartbeatSeconds}s`
-        : "";
-    return `Web: linked • auth refreshed ${authAge}${heartbeat}`;
-  })();
-
   const sessionLine = [
     `Session: ${args.sessionKey ?? "unknown"}`,
     `scope ${args.sessionScope ?? "per-sender"}`,
@@ -221,7 +206,6 @@ export function buildStatusMessage(args: StatusArgs): string {
 
   return [
     "⚙️ Status",
-    webLine,
     agentLine,
     workspaceLine,
     contextLine,

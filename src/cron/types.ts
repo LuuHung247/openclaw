@@ -16,9 +16,7 @@ export type CronPayload =
       deliver?: boolean;
       channel?:
         | "last"
-        | "whatsapp"
-        | "telegram"
-        | "discord";
+        | "telegram";
       to?: string;
       bestEffortDeliver?: boolean;
     };

@@ -118,9 +118,7 @@ export type HookMappingConfig = {
   deliver?: boolean;
   channel?:
     | "last"
-    | "whatsapp"
-    | "telegram"
-    | "discord";
+    | "telegram";
   to?: string;
   thinking?: string;
   timeoutSeconds?: number;
@@ -553,12 +551,10 @@ export type ClawdisConfig = {
       every?: string;
       /** Heartbeat model override (provider/model). */
       model?: string;
-      /** Delivery target (last|whatsapp|telegram|discord|none). */
+      /** Delivery target (last|telegram|none). */
       target?:
         | "last"
-        | "whatsapp"
         | "telegram"
-        | "discord"
         | "none";
       /** Optional delivery override (E.164 for WhatsApp, chat id for Telegram). */
       to?: string;
@@ -738,9 +734,7 @@ const HeartbeatSchema = z
     target: z
       .union([
         z.literal("last"),
-        z.literal("whatsapp"),
         z.literal("telegram"),
-        z.literal("discord"),
         z.literal("none"),
       ])
       .optional(),
@@ -798,9 +792,7 @@ const HookMappingSchema = z
     channel: z
       .union([
         z.literal("last"),
-        z.literal("whatsapp"),
         z.literal("telegram"),
-        z.literal("discord"),
       ])
       .optional(),
     to: z.string().optional(),

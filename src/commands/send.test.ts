@@ -16,17 +16,14 @@ vi.mock("../gateway/call.js", () => ({
 }));
 
 const originalTelegramToken = process.env.TELEGRAM_BOT_TOKEN;
-const originalDiscordToken = process.env.DISCORD_BOT_TOKEN;
 
 beforeEach(() => {
   process.env.TELEGRAM_BOT_TOKEN = "token-abc";
-  process.env.DISCORD_BOT_TOKEN = "token-discord";
   testConfig = {};
 });
 
 afterAll(() => {
   process.env.TELEGRAM_BOT_TOKEN = originalTelegramToken;
-  process.env.DISCORD_BOT_TOKEN = originalDiscordToken;
 });
 
 const runtime: RuntimeEnv = {
@@ -38,10 +35,7 @@ const runtime: RuntimeEnv = {
 };
 
 const makeDeps = (overrides: Partial<CliDeps> = {}): CliDeps => ({
-  sendMessageWhatsApp: vi.fn(),
   sendMessageTelegram: vi.fn(),
-  sendMessageDiscord: vi.fn(),
-  sendMessageIMessage: vi.fn(),
   ...overrides,
 });
 
@@ -57,12 +51,14 @@ describe("sendCommand", () => {
       deps,
       runtime,
     );
-    expect(deps.sendMessageWhatsApp).not.toHaveBeenCalled();
+    expect(deps.sendMessageTelegram).not.toHaveBeenCalled();
   });
 
-  it("sends via gateway", async () => {
-    callGatewayMock.mockResolvedValueOnce({ messageId: "g1" });
-    const deps = makeDeps();
+  it("sends via telegram by default", async () => {
+    const deps = makeDeps({
+      sendMessageTelegram: vi.fn().mockResolvedValue({ messageId: "t1", chatId: "+1" }),
+    });
+    testConfig = { telegram: { botToken: "token-abc" } };
     await sendCommand(
       {
         to: "+1",
@@ -71,8 +67,8 @@ describe("sendCommand", () => {
       deps,
       runtime,
     );
-    expect(callGatewayMock).toHaveBeenCalled();
-    expect(runtime.log).toHaveBeenCalledWith(expect.stringContaining("g1"));
+    expect(deps.sendMessageTelegram).toHaveBeenCalled();
+    expect(runtime.log).toHaveBeenCalledWith(expect.stringContaining("t1"));
   });
 
   it("routes to telegram provider", async () => {
@@ -92,7 +88,6 @@ describe("sendCommand", () => {
       "hi",
       expect.objectContaining({ token: "token-abc" }),
     );
-    expect(deps.sendMessageWhatsApp).not.toHaveBeenCalled();
   });
 
   it("uses config token for telegram when env is missing", async () => {
@@ -115,45 +110,11 @@ describe("sendCommand", () => {
     );
   });
 
-  it("routes to discord provider", async () => {
-    const deps = makeDeps({
-      sendMessageDiscord: vi
-        .fn()
-        .mockResolvedValue({ messageId: "d1", channelId: "chan" }),
-    });
-    await sendCommand(
-      { to: "channel:chan", message: "hi", provider: "discord" },
-      deps,
-      runtime,
-    );
-    expect(deps.sendMessageDiscord).toHaveBeenCalledWith(
-      "channel:chan",
-      "hi",
-      expect.objectContaining({ token: "token-discord" }),
-    );
-    expect(deps.sendMessageWhatsApp).not.toHaveBeenCalled();
-  });
-
-  it("routes to imessage provider", async () => {
-    const deps = makeDeps({
-      sendMessageIMessage: vi.fn().mockResolvedValue({ messageId: "i1" }),
-    });
-    await sendCommand(
-      { to: "chat_id:42", message: "hi", provider: "imessage" },
-      deps,
-      runtime,
-    );
-    expect(deps.sendMessageIMessage).toHaveBeenCalledWith(
-      "chat_id:42",
-      "hi",
-      expect.objectContaining({ mediaUrl: undefined }),
-    );
-    expect(deps.sendMessageWhatsApp).not.toHaveBeenCalled();
-  });
-
   it("emits json output", async () => {
-    callGatewayMock.mockResolvedValueOnce({ messageId: "direct2" });
-    const deps = makeDeps();
+    const deps = makeDeps({
+      sendMessageTelegram: vi.fn().mockResolvedValue({ messageId: "direct2", chatId: "+1" }),
+    });
+    testConfig = { telegram: { botToken: "token-abc" } };
     await sendCommand(
       {
         to: "+1",
@@ -164,7 +125,7 @@ describe("sendCommand", () => {
       runtime,
     );
     expect(runtime.log).toHaveBeenCalledWith(
-      expect.stringContaining('"provider": "web"'),
+      expect.stringContaining('"provider": "telegram"'),
     );
   });
 });

@@ -1,35 +1,12 @@
 import chalk from "chalk";
 import { type ClawdisConfig, loadConfig } from "../config/config.js";
 import { resolveTelegramToken } from "../telegram/token.js";
-import { normalizeE164 } from "../utils.js";
-import {
-  getWebAuthAgeMs,
-  readWebSelfId,
-  webAuthExists,
-} from "../web/session.js";
 
 export async function buildProviderSummary(
   cfg?: ClawdisConfig,
 ): Promise<string[]> {
   const effective = cfg ?? loadConfig();
   const lines: string[] = [];
-
-  const webEnabled = effective.web?.enabled !== false;
-  if (!webEnabled) {
-    lines.push(chalk.cyan("WhatsApp: disabled"));
-  } else {
-    const webLinked = await webAuthExists();
-    const authAgeMs = getWebAuthAgeMs();
-    const authAge = authAgeMs === null ? "unknown" : formatAge(authAgeMs);
-    const { e164 } = readWebSelfId();
-    lines.push(
-      webLinked
-        ? chalk.green(
-            `WhatsApp: linked${e164 ? ` as ${e164}` : ""} (auth ${authAge})`,
-          )
-        : chalk.red("WhatsApp: not linked"),
-    );
-  }
 
   const telegramEnabled = effective.telegram?.enabled !== false;
   if (!telegramEnabled) {
@@ -54,13 +31,6 @@ export async function buildProviderSummary(
         ? chalk.green("iMessage: configured")
         : chalk.cyan("iMessage: not configured"),
     );
-  }
-
-  const allowFrom = effective.whatsapp?.allowFrom?.length
-    ? effective.whatsapp.allowFrom.map(normalizeE164).filter(Boolean)
-    : [];
-  if (allowFrom.length) {
-    lines.push(chalk.cyan(`AllowFrom: ${allowFrom.join(", ")}`));
   }
 
   return lines;

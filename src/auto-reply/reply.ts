@@ -55,8 +55,6 @@ import {
 import { clearCommandLane, getQueueSize } from "../process/command-queue.js";
 import { defaultRuntime } from "../runtime.js";
 import { normalizeE164 } from "../utils.js";
-import { resolveHeartbeatSeconds } from "../web/reconnect.js";
-import { getWebAuthAgeMs, webAuthExists } from "../web/session.js";
 import {
   normalizeGroupActivation,
   parseActivationCommand,
@@ -1567,9 +1565,6 @@ export async function getReplyFromConfig(
       cleanupTyping();
       return undefined;
     }
-    const webLinked = await webAuthExists();
-    const webAuthAgeMs = getWebAuthAgeMs();
-    const heartbeatSeconds = resolveHeartbeatSeconds(cfg, undefined);
     const groupActivation = isGroup
       ? (normalizeGroupActivation(sessionEntry?.groupActivation) ??
         defaultGroupActivation())
@@ -1589,9 +1584,6 @@ export async function getReplyFromConfig(
       groupActivation,
       resolvedThink: resolvedThinkLevel,
       resolvedVerbose: resolvedVerboseLevel,
-      webLinked,
-      webAuthAgeMs,
-      heartbeatSeconds,
     });
     cleanupTyping();
     return { text: statusText };

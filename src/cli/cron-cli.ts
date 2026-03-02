@@ -155,12 +155,12 @@ export function registerCronCli(program: Command) {
       .option("--deliver", "Deliver agent output", false)
       .option(
         "--channel <channel>",
-        "Delivery channel (last|whatsapp|telegram|discord|signal|imessage)",
+        "Delivery channel (last|telegram)",
         "last",
       )
       .option(
         "--to <dest>",
-        "Delivery destination (E.164, Telegram chatId, or Discord channel/user)",
+        "Delivery destination (Telegram chatId)",
       )
       .option(
         "--best-effort-deliver",
@@ -414,11 +414,11 @@ export function registerCronCli(program: Command) {
       .option("--deliver", "Deliver agent output", false)
       .option(
         "--channel <channel>",
-        "Delivery channel (last|whatsapp|telegram|discord|signal|imessage)",
+        "Delivery channel (last|telegram)",
       )
       .option(
         "--to <dest>",
-        "Delivery destination (E.164, Telegram chatId, or Discord channel/user)",
+        "Delivery destination (Telegram chatId)",
       )
       .option(
         "--best-effort-deliver",
