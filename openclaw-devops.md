@@ -155,3 +155,127 @@ Xóa khỏi Tooling section trong `src/agents/system-prompt.ts`:
 Xóa 2 test trong `src/gateway/server.test.ts`:
 - `"hello-ok advertises the gateway port for canvas host"` — test cho canvas-host đã xóa
 - `"agent events stream to webchat clients when run context is registered"` — test cho webchat đã xóa
+
+### Thêm mới — Dashboard UI (từ openfang)
+
+Port toàn bộ UI của openfang sang openclaw:
+
+| Thứ | Chi tiết |
+|-----|----------|
+| `ui/` | Static assets (Alpine.js SPA, CSS, vendor libs) copy từ openfang |
+| `ui/js/api.js` | Rewrite hoàn toàn — giao tiếp qua Gateway WebSocket thay vì REST |
+| `src/gateway/server.ts` | Thêm `handleUiRequest()` — serve `/ui/*` và redirect `/` → index |
+
+**Pages giữ lại (DevOps):** Chat, Overview, Sessions, Approvals, Logs, Scheduler, Workflows, Channels, Skills, Analytics, Settings
+
+**Pages đã bỏ:** Hands, Comms, Wizard (openfang-specific)
+
+Truy cập sau khi gateway chạy: `http://localhost:18789/ui`
+
+---
+
+## 5. Chạy với Docker
+
+Files có sẵn trong repo: `Dockerfile`, `docker-compose.yml`.
+
+```
+Base image: node:22-bookworm
+Build:      pnpm install --frozen-lockfile && pnpm build
+CMD:        node dist/index.js
+Image name: clawdis:local  (override bằng env CLAWDIS_IMAGE)
+```
+
+### Bước 1 — Tạo config/workspace trên host
+
+```bash
+mkdir -p ~/.clawdis ~/clawd
+```
+
+Tạo `~/.clawdis/clawdis.json` tối thiểu:
+
+```json5
+{
+  agent: { workspace: "/home/node/clawd" },
+  telegram: { botToken: "YOUR_BOT_TOKEN" },
+  gateway: { mode: "local", bind: "lan" }
+}
+```
+
+### Bước 2 — Build image
+
+```bash
+docker build -t clawdis:local .
+```
+
+### Bước 3 — Onboard qua docker compose
+
+```bash
+export CLAWDIS_CONFIG_DIR=~/.clawdis
+export CLAWDIS_WORKSPACE_DIR=~/clawd
+export CLAWDIS_GATEWAY_TOKEN=$(openssl rand -hex 32)
+
+docker compose run --rm clawdis-cli onboard
+```
+
+> Trong wizard: chọn **Gateway bind = lan**, **auth = token**, paste token ở trên, **Tailscale = off**, **Install daemon = No**.
+
+### Bước 4 — Start gateway
+
+```bash
+docker compose up -d clawdis-gateway
+docker compose logs -f clawdis-gateway
+```
+
+### Stop / restart
+
+```bash
+docker compose down
+docker compose restart clawdis-gateway
+```
+
+### Volumes
+
+| Env var | Default | Mount trong container | Mục đích |
+|---------|---------|-----------------------|----------|
+| `CLAWDIS_CONFIG_DIR` | `~/.clawdis` | `/home/node/.clawdis` | Config JSON, session store, Telegram credentials |
+| `CLAWDIS_WORKSPACE_DIR` | `~/clawd` | `/home/node/clawd` | Agent workspace, skills, memory files |
+
+### Ports
+
+| Env var | Default host | Container | Dùng cho |
+|---------|-------------|-----------|----------|
+| `CLAWDIS_GATEWAY_PORT` | `18789` | `18789` | Gateway WebSocket + Dashboard UI (`/ui`) |
+| `CLAWDIS_BRIDGE_PORT` | `18790` | `18790` | Bridge port (optional, có thể tắt) |
+
+### Env vars cần export trước khi `docker compose`
+
+```bash
+export CLAWDIS_CONFIG_DIR=~/.clawdis
+export CLAWDIS_WORKSPACE_DIR=~/clawd
+export CLAWDIS_GATEWAY_TOKEN=<hex-token>   # bắt buộc nếu dùng auth
+export CLAWDIS_GATEWAY_BIND=lan            # lan | loopback | tailnet | auto
+# export CLAWDIS_GATEWAY_PORT=18789        # nếu muốn đổi port
+```
+
+Hoặc lưu vào `.env` rồi docker compose tự load.
+
+### Test sau khi chạy
+
+```bash
+# Dashboard UI
+curl -I http://localhost:18789/ui
+
+# Health check qua CLI trong container
+docker compose exec clawdis-gateway \
+  node dist/index.js health --token "$CLAWDIS_GATEWAY_TOKEN"
+
+# Gửi message test
+docker compose exec clawdis-gateway \
+  node dist/index.js agent --message "ping"
+
+# Shell vào container
+docker compose exec clawdis-gateway bash
+
+# Logs realtime
+docker compose logs -f clawdis-gateway
+```

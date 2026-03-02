@@ -1656,6 +1656,87 @@ export async function startGatewayServer(
     return true;
   };
 
+  // ── In-memory audit log ring buffer (for SSE /api/logs/stream) ──
+  const auditLog: Array<{
+    seq: number;
+    timestamp: string;
+    action: string;
+    detail: string;
+    agent_id: string | null;
+  }> = [];
+  let auditSeq = 0;
+  const SSE_CLIENTS = new Set<import("node:http").ServerResponse>();
+
+  function appendAudit(action: string, detail: string, agentId?: string | null) {
+    const entry = {
+      seq: ++auditSeq,
+      timestamp: new Date().toISOString(),
+      action,
+      detail: detail ?? "",
+      agent_id: agentId ?? null,
+    };
+    auditLog.push(entry);
+    if (auditLog.length > 500) auditLog.splice(0, auditLog.length - 500);
+    const data = "data: " + JSON.stringify(entry) + "\n\n";
+    for (const client of SSE_CLIENTS) {
+      try { client.write(data); } catch { SSE_CLIENTS.delete(client); }
+    }
+  }
+
+  // ── SSE + audit REST handler ──
+  const handleAuditRequest = (
+    req: IncomingMessage,
+    res: import("node:http").ServerResponse,
+  ): boolean => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const pathname = url.pathname;
+
+    // SSE stream for live logs
+    if (pathname === "/api/logs/stream") {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.write(": connected\n\n");
+      // Replay last 50 entries
+      const recent = auditLog.slice(-50);
+      for (const entry of recent) {
+        res.write("data: " + JSON.stringify(entry) + "\n\n");
+      }
+      SSE_CLIENTS.add(res);
+      req.on("close", () => { SSE_CLIENTS.delete(res); });
+      // Heartbeat to keep connection alive
+      const hb = setInterval(() => {
+        try { res.write(": heartbeat\n\n"); } catch { clearInterval(hb); SSE_CLIENTS.delete(res); }
+      }, 15000);
+      req.on("close", () => clearInterval(hb));
+      return true;
+    }
+
+    // Polling fallback: /api/audit/recent?n=N
+    if (pathname === "/api/audit/recent" || pathname === "/api/logs") {
+      const n = Math.min(parseInt(url.searchParams.get("n") ?? "100"), 500);
+      const entries = auditLog.slice(-n);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.end(JSON.stringify({ entries, tip_hash: "" }));
+      return true;
+    }
+
+    // Audit verify
+    if (pathname === "/api/audit/verify") {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.end(JSON.stringify({ valid: true, entries: auditLog.length }));
+      return true;
+    }
+
+    return false;
+  };
+
   // UI static file serving — serves ./ui/ directory at /ui/
   const uiDir = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),
@@ -1736,6 +1817,7 @@ export async function startGatewayServer(
 
     void (async () => {
       if (await handleUiRequest(req, res)) return;
+      if (handleAuditRequest(req, res)) return;
       if (await handleHooksRequest(req, res)) return;
 
       res.statusCode = 404;
@@ -2076,6 +2158,27 @@ export async function startGatewayServer(
       Object.assign(logMeta, summarizeAgentEventForWsLog(payload));
     }
     logWs("out", "event", logMeta);
+    // Append gateway events to in-memory audit log for /api/logs/stream
+    if (event === "agent") {
+      const p = payload as Record<string, unknown> | null | undefined;
+      const sk = (p as Record<string, string> | undefined)?.sessionKey ?? "main";
+      const model = (p as Record<string, string> | undefined)?.model ?? "";
+      appendAudit("AgentMessage", `Response from ${sk}${model ? " (" + model + ")" : ""}`, sk);
+    } else if (event === "agent.tool" || event === "tool") {
+      const p = payload as Record<string, unknown> | null | undefined;
+      const sk = (p as Record<string, string> | undefined)?.sessionKey ?? "main";
+      const tool = (p as Record<string, string> | undefined)?.toolName ?? (p as Record<string, string> | undefined)?.tool ?? "unknown";
+      appendAudit("ToolInvoke", `Tool: ${tool} in ${sk}`, sk);
+    } else if (event === "session.reset") {
+      const p = payload as Record<string, unknown> | null | undefined;
+      appendAudit("SessionReset", `Session reset: ${(p as Record<string, string> | undefined)?.sessionKey ?? "?"}`);
+    } else if (event === "cron.fired" || event === "cron.run") {
+      const p = payload as Record<string, unknown> | null | undefined;
+      appendAudit("TriggerFired", `Cron fired: ${(p as Record<string, string> | undefined)?.id ?? (p as Record<string, string> | undefined)?.name ?? "?"}`);
+    } else if (event === "skills.installed") {
+      const p = payload as Record<string, unknown> | null | undefined;
+      appendAudit("SkillInstalled", `Skill installed: ${(p as Record<string, string> | undefined)?.name ?? "?"}`);
+    }
     for (const c of clients) {
       const slow = c.socket.bufferedAmount > MAX_BUFFERED_BYTES;
       if (slow && opts?.dropIfSlow) continue;
