@@ -1656,13 +1656,87 @@ export async function startGatewayServer(
     return true;
   };
 
+  // UI static file serving — serves ./ui/ directory at /ui/
+  const uiDir = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    "../../ui",
+  );
+  const uiEnabled = fs.existsSync(uiDir);
+
+  const MIME_TYPES: Record<string, string> = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".svg": "image/svg+xml",
+    ".woff2": "font/woff2",
+    ".woff": "font/woff",
+  };
+
+  const serveUiFile = async (
+    filePath: string,
+    res: import("node:http").ServerResponse,
+  ): Promise<boolean> => {
+    try {
+      // Canonicalize and check it's within uiDir (prevent path traversal)
+      const real = await fs.promises.realpath(filePath).catch(() => null);
+      if (!real || !real.startsWith(uiDir + path.sep) && real !== uiDir) {
+        return false;
+      }
+      const stat = await fs.promises.stat(real);
+      if (!stat.isFile()) return false;
+      const ext = path.extname(real).toLowerCase();
+      const mime = MIME_TYPES[ext] ?? "application/octet-stream";
+      const data = await fs.promises.readFile(real);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", mime);
+      res.setHeader("Cache-Control", "no-cache");
+      res.end(data);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleUiRequest = async (
+    req: IncomingMessage,
+    res: import("node:http").ServerResponse,
+  ): Promise<boolean> => {
+    if (!uiEnabled) return false;
+    const url = new URL(req.url ?? "/", `http://localhost`);
+    const pathname = url.pathname;
+
+    // Serve / and /ui → index
+    if (pathname === "/" || pathname === "/ui" || pathname === "/ui/") {
+      const head = await fs.promises.readFile(path.join(uiDir, "index_head.html"), "utf8");
+      const body = await fs.promises.readFile(path.join(uiDir, "index_body.html"), "utf8");
+      const html = head.replace("</head>", "") + body + "</html>";
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache");
+      res.end(html);
+      return true;
+    }
+
+    // Serve /ui/* static assets
+    if (pathname.startsWith("/ui/")) {
+      const rel = pathname.slice("/ui/".length);
+      const filePath = path.join(uiDir, rel);
+      return await serveUiFile(filePath, res);
+    }
+
+    return false;
+  };
+
   const httpServer: HttpServer = createHttpServer((req, res) => {
     // Don't interfere with WebSocket upgrades; ws handles the 'upgrade' event.
     if (String(req.headers.upgrade ?? "").toLowerCase() === "websocket") return;
 
     void (async () => {
+      if (await handleUiRequest(req, res)) return;
       if (await handleHooksRequest(req, res)) return;
-
 
       res.statusCode = 404;
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
