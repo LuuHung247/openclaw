@@ -1834,10 +1834,16 @@ var OpenFangAPI = (function() {
         _chatFinalSentBySid[sid] = true;
 
         if (state === 'final') {
+          // Send gateway's final text as a text_replace to ensure the bubble
+          // has the complete content (delta throttling may have skipped some events)
+          var gatewayFinalText = payload.message && payload.message.content && payload.message.content[0] && payload.message.content[0].text || '';
+          if (gatewayFinalText) {
+            cb.onMessage({ type: 'text_replace', content: gatewayFinalText });
+          }
           var usage = _lastSessionUsage[sid] || {};
           cb.onMessage({
             type: 'response',
-            content: '',
+            content: gatewayFinalText,
             input_tokens: usage.inputTokens || 0,
             output_tokens: usage.outputTokens || 0,
             cost_usd: usage.costUsd || 0

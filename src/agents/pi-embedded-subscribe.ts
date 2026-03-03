@@ -264,14 +264,20 @@ export function subscribeEmbeddedPiSession(params: {
             evtType === "text_start" ||
             evtType === "text_end"
           ) {
-            const chunk =
-              typeof assistantRecord?.delta === "string"
-                ? assistantRecord.delta
-                : typeof assistantRecord?.content === "string"
-                  ? assistantRecord.content
-                  : "";
-            if (chunk) {
-              deltaBuffer += chunk;
+            // Only accumulate text from delta/start events.
+            // text_end may carry a `content` field with the full block text,
+            // but deltaBuffer already has the accumulated deltas — appending
+            // the full content again would double the text.
+            if (evtType !== "text_end") {
+              const chunk =
+                typeof assistantRecord?.delta === "string"
+                  ? assistantRecord.delta
+                  : typeof assistantRecord?.content === "string"
+                    ? assistantRecord.content
+                    : "";
+              if (chunk) {
+                deltaBuffer += chunk;
+              }
             }
 
             const cleaned = params.enforceFinalTag
