@@ -1078,7 +1078,7 @@ var OpenFangAPI = (function() {
       setup_type: 'form',
       difficulty: 'Easy',
       fields: [
-        { key: 'bot_token', label: 'Bot Token', type: 'password', advanced: false }
+        { key: 'bot_token', label: 'Bot Token', type: 'secret', advanced: false }
       ]
     };
     return request('providers.status').then(function(p) {
