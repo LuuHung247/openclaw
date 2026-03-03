@@ -600,13 +600,21 @@ function chatPage() {
           this.scrollToBottom();
           break;
 
+        case 'text_replace':
         case 'text_delta':
           var last = this.messages.length ? this.messages[this.messages.length - 1] : null;
           if (last && last.streaming) {
             if (last.thinking) { last.text = ''; last.thinking = false; }
             // If we already detected a text-based tool call, skip further text
             if (last._toolTextDetected) break;
-            last.text += extractContentText(data.content);
+            var newContent = extractContentText(data.content);
+            // text_replace: SET (gateway sends full cumulative text — idempotent, no duplicates)
+            // text_delta: APPEND (fallback for incremental mode)
+            if (data.type === 'text_replace') {
+              last.text = newContent;
+            } else {
+              last.text += newContent;
+            }
             // Detect function-call patterns streamed as text and convert to tool cards
             var fcIdx = last.text.search(/\w+<\/function[=,>]/);
             if (fcIdx === -1) fcIdx = last.text.search(/<function=\w+>/);
@@ -721,9 +729,10 @@ function chatPage() {
           if (data.cost_usd != null) meta += ' | $' + data.cost_usd.toFixed(4);
           if (data.iterations) meta += ' | ' + data.iterations + ' iter';
           if (data.fallback_model) meta += ' | fallback: ' + data.fallback_model;
-          // Use server response if non-empty, otherwise preserve accumulated streamed text
-          var _resolvedContent = extractContentText(data.content);
-          var finalText = (_resolvedContent && _resolvedContent.trim()) ? _resolvedContent : streamedText;
+          // Use streamedText accumulated via text_delta APPENDs (openfang approach).
+          // data.content is empty — gateway sends all text as incremental deltas,
+          // so streamedText in the bubble is always the complete correct text.
+          var finalText = streamedText || extractContentText(data.content);
           // Strip raw function-call JSON that some models leak as text
           finalText = this.sanitizeToolText(finalText);
           // If text is empty but tools ran, show a summary
@@ -905,10 +914,13 @@ function chatPage() {
       // Use chat.send RPC for streaming (gateway emits 'chat' events back to all clients)
       if (OpenFangAPI.isWsConnected()) {
         try {
+          var idemKey = 'ui-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+          // Register runId so event router can filter duplicates (like openclaw-old)
+          if (OpenFangAPI.setChatRunId) OpenFangAPI.setChatRunId(sessionKey, idemKey);
           var chatParams = {
             sessionKey: sessionKey,
             message: finalText,
-            idempotencyKey: 'ui-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+            idempotencyKey: idemKey,
             thinking: this.thinkingMode !== 'off' ? this.thinkingMode : undefined,
             timeoutMs: 30000
           };

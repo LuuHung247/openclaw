@@ -307,6 +307,12 @@ function agentsPage() {
     },
 
     chatWithAgent(agent) {
+      if (agent.channel === 'webui' || agent.id === 'webui') {
+        // WebUI session → navigate to dedicated Chat tab
+        Alpine.store('app').pendingAgent = agent;
+        window.location.hash = 'chat';
+        return;
+      }
       Alpine.store('app').pendingAgent = agent;
       this.activeChatAgent = agent;
     },

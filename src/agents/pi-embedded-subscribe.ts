@@ -77,6 +77,7 @@ export function subscribeEmbeddedPiSession(params: {
   const toolMetaById = new Map<string, string | undefined>();
   const blockReplyBreak = params.blockReplyBreak ?? "text_end";
   let deltaBuffer = "";
+  let cumulativeAssistantText = "";
   let lastStreamedAssistant: string | undefined;
   let lastBlockReplyText: string | undefined;
   let assistantTextBaseline = 0;
@@ -152,6 +153,7 @@ export function subscribeEmbeddedPiSession(params: {
     toolMetas.length = 0;
     toolMetaById.clear();
     deltaBuffer = "";
+    cumulativeAssistantText = "";
     lastStreamedAssistant = undefined;
     lastBlockReplyText = undefined;
     assistantTextBaseline = 0;
@@ -275,13 +277,17 @@ export function subscribeEmbeddedPiSession(params: {
             const cleaned = params.enforceFinalTag
               ? stripThinkingSegments(stripUnpairedThinkingTags(deltaBuffer))
               : stripThinkingSegments(deltaBuffer);
-            const next = params.enforceFinalTag
+            const blockText = params.enforceFinalTag
               ? (extractFinalText(cleaned)?.trim() ?? cleaned.trim())
               : cleaned.trim();
-            if (next && next !== lastStreamedAssistant) {
-              lastStreamedAssistant = next;
+
+            // Emit only the current block's text (not cumulative).
+            // Gateway will overwrite its buffer each time (SET, not append).
+            // Client uses text_replace (SET) to avoid duplicate accumulation.
+            if (blockText && blockText !== lastStreamedAssistant) {
+              lastStreamedAssistant = blockText;
               const { text: cleanedText, mediaUrls } =
-                splitMediaFromOutput(next);
+                splitMediaFromOutput(blockText);
               emitAgentEvent({
                 runId: params.runId,
                 stream: "assistant",
@@ -305,26 +311,26 @@ export function subscribeEmbeddedPiSession(params: {
               }
             }
 
-            if (evtType === "text_end" && blockReplyBreak === "text_end") {
-              if (next && next === lastBlockReplyText) {
-                deltaBuffer = "";
-                lastStreamedAssistant = undefined;
-                return;
-              }
-              lastBlockReplyText = next || undefined;
-              if (next) assistantTexts.push(next);
-              if (next && params.onBlockReply) {
-                const { text: cleanedText, mediaUrls } =
-                  splitMediaFromOutput(next);
-                if (cleanedText || (mediaUrls && mediaUrls.length > 0)) {
-                  void params.onBlockReply({
-                    text: cleanedText,
-                    mediaUrls: mediaUrls?.length ? mediaUrls : undefined,
-                  });
+            if (evtType === "text_end") {
+              if (blockReplyBreak === "text_end") {
+                if (blockText && blockText === lastBlockReplyText) {
+                  deltaBuffer = "";
+                  return;
+                }
+                lastBlockReplyText = blockText || undefined;
+                if (blockText) assistantTexts.push(blockText);
+                if (blockText && params.onBlockReply) {
+                  const { text: cleanedText, mediaUrls } =
+                    splitMediaFromOutput(blockText);
+                  if (cleanedText || (mediaUrls && mediaUrls.length > 0)) {
+                    void params.onBlockReply({
+                      text: cleanedText,
+                      mediaUrls: mediaUrls?.length ? mediaUrls : undefined,
+                    });
+                  }
                 }
               }
               deltaBuffer = "";
-              lastStreamedAssistant = undefined;
             }
           }
         }
@@ -372,6 +378,7 @@ export function subscribeEmbeddedPiSession(params: {
             }
           }
           deltaBuffer = "";
+          cumulativeAssistantText = "";
           lastStreamedAssistant = undefined;
           lastBlockReplyText = undefined;
         }

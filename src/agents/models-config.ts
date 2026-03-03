@@ -37,7 +37,23 @@ export async function ensureClawdisModelsJson(
   const agentDir = ensureClawdisAgentEnv();
   const targetPath = path.join(agentDir, "models.json");
 
-  let mergedProviders = providers;
+  // Only include providers that define their own models array.
+  // Providers with only apiKey (e.g. zai) are handled by the built-in
+  // library registry and do not need to appear in models.json.
+  // Including them without a models[] would fail schema validation and
+  // prevent ALL custom providers (like deepseek) from loading.
+  const customProviders: typeof providers = {};
+  for (const [pid, entry] of Object.entries(providers)) {
+    if (entry && Array.isArray(entry.models) && entry.models.length > 0) {
+      customProviders[pid] = entry;
+    }
+  }
+
+  if (Object.keys(customProviders).length === 0) {
+    return { agentDir, wrote: false };
+  }
+
+  let mergedProviders = customProviders;
   let existingRaw = "";
   if (mode === "merge") {
     const existing = await readJson(targetPath);
@@ -46,7 +62,7 @@ export async function ensureClawdisModelsJson(
         string,
         NonNullable<ModelsConfig["providers"]>[string]
       >;
-      mergedProviders = { ...existingProviders, ...providers };
+      mergedProviders = { ...existingProviders, ...customProviders };
     }
   }
 

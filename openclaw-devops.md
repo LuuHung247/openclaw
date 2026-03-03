@@ -465,3 +465,82 @@ Quick update (không rebuild):
 ```bash
 docker cp ui/js/api.js <container>:/app/ui/js/api.js
 ```
+
+---
+
+## 9. WebUI Chat — Session Isolation & Streaming Fix (Session 4)
+
+### Vấn đề ban đầu
+
+Chat trên WebUI hoàn toàn không hoạt động — gửi message không nhận được response.
+
+### Root Cause phân tích
+
+| # | Bug | Root cause |
+|---|-----|-----------|
+| 1 | Gửi message không đến gateway | `_sendPayload` gửi raw `{type:'message', content}` qua WS — gateway không hiểu, chỉ accept JSON-RPC `{type:'req', method, params}` |
+| 2 | Event routing sai type | Event router wrap payload thành `{type:'agent', payload}` nhưng `handleWsMessage` switch trên `text_delta`, `response`, etc. — không có case `agent` |
+| 3 | Delta text bị duplicate trong bubble | Gateway gửi **cumulative** text mỗi delta (không phải incremental) — nếu append trực tiếp sẽ bị "HelloHello world" |
+| 4 | `OpenFangAPI.request` không được expose | Internal `request()` function chưa export ra public API object |
+| 5 | Tin nhắn duplicate (2 bubbles) | Gateway emit 2x `broadcast("chat", state:final)` per run: một từ `chatLink` branch (dùng `idempotencyKey` làm runId), một từ `else` branch (dùng `sessionId`) → 2 `response` events |
+| 6 | WebUI nhận message của Telegram | `_agentEventListeners['main']` là fallback → nhận **mọi** chat event của session `main` kể cả Telegram |
+
+### Fixes đã implement
+
+**`ui/js/api.js`:**
+
+1. **Expose `request()`** — thêm `request: request` vào object return của `OpenFangAPI`
+
+2. **Event router mới** — lắng nghe `chat` events (không phải `agent`), translate sang format chat.js hiểu:
+   - `state: 'delta'` → tính incremental diff → `{type: 'text_delta', content: delta}`
+   - `state: 'final'` → `{type: 'response', content: fullText}`
+   - `state: 'error/aborted'` → `{type: 'error', message}`
+   - Track `_chatRunText[runId]` để compute delta từ cumulative text
+
+3. **Dedup final events** — track `_sessionFinalSeq[sid]`: nếu nhận `final/error/aborted` với seq đã xử lý rồi thì skip (gateway gửi 2 broadcasts cùng seq)
+
+4. **Bỏ cross-session fallback** — `_agentEventListeners[sid]` only, không `|| _agentEventListeners['main']`
+
+5. **Session display** — `getAgents()` thêm `channel` field, inject `webui` session luôn dù chưa chat, tên đẹp: `main` → "Telegram", `webui` → "WebUI Chat"
+
+**`ui/js/pages/chat.js`:**
+
+6. **`_sendPayload` dùng `chat.send` RPC** thay vì raw `wsSend`:
+   ```js
+   await OpenFangAPI.request('chat.send', {
+     sessionKey, message, idempotencyKey, thinking, timeoutMs: 30000
+   }, 600000);
+   // chat.send blocks until agent run completes; 'chat' events stream in the meantime
+   ```
+
+7. **`autoLoadAgent` dùng session `webui`** — không lấy `agents[0]` (session `main` của Telegram):
+   ```js
+   var webuiAgent = { id: 'webui', name: 'WebUI Chat', ... };
+   this.selectAgent(webuiAgent);
+   ```
+
+**`ui/js/pages/agents.js`:**
+
+8. **`chatWithAgent` redirect** — click session `webui` → navigate sang tab Chat thay vì mở inline
+
+### Gateway chat event format (tham khảo)
+
+```
+chat event {
+  state: "delta" | "final" | "error" | "aborted",
+  sessionKey: string,
+  runId: string,       // idempotencyKey (chatLink branch) hoặc sessionId (else branch)
+  seq: number,         // cùng seq cho cả 2 broadcasts — dùng để dedup
+  message?: {
+    role: "assistant",
+    content: [{ type: "text", text: string }]  // cumulative text ở delta
+  },
+  errorMessage?: string
+}
+```
+
+### Còn tồn đọng ⚠️
+
+- **Duplicate vẫn có thể xảy ra** nếu 2 `final` broadcasts có `seq = 0` (fallback khi seq không có) — cần monitor thêm
+- **`0 in / 0 out`** trong message meta — `chat.send` không trả về token count; cần lấy từ `agent` event usage nếu muốn hiển thị đúng
+- **History load**: `loadSession` dùng `chat.history` RPC, format message từ Pi runtime transcript (JSONL) — cần verify khi có nhiều tool calls

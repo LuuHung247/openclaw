@@ -183,6 +183,8 @@ var OpenFangAPI = (function() {
   var _auditLog = [];   // [{seq, timestamp, action, detail, sessionKey}]
   var _auditSeq = 0;
 
+  var _lastSessionUsage = {}; // sessionKey -> { inputTokens, outputTokens, costUsd }
+
   function nextId() { return 'ui-' + (++_reqId); }
 
   function setConnectionState(state) {
@@ -382,6 +384,11 @@ var OpenFangAPI = (function() {
         m.call_count += 1;
       }
 
+      // Save usage for chat UI response metadata
+      if (usage && (usage.inputTokens > 0 || usage.outputTokens > 0)) {
+        _lastSessionUsage[sessionKey] = usage;
+      }
+
       // Daily cost accumulation
       if (!_usageAccumulator.dailyCosts[today]) {
         _usageAccumulator.dailyCosts[today] = { cost_usd: 0, tokens: 0, calls: 0 };
@@ -489,21 +496,32 @@ var OpenFangAPI = (function() {
 
   // sessions / agents
   // Gateway sessions.list returns: { sessions: [{key, kind, updatedAt, sessionId, totalTokens, model?, contextTokens?, percentUsed?, abortedLastRun}] }
+  function _sessionDisplayName(key, lastChannel) {
+    if (key === 'webui') return 'WebUI Chat';
+    if (key === 'main') return lastChannel === 'telegram' ? 'Telegram' : 'Main';
+    return key;
+  }
+  function _sessionChannel(key, lastChannel) {
+    if (key === 'webui') return 'webui';
+    return lastChannel || 'telegram';
+  }
+
   function getAgents() {
     return request('sessions.list').then(function(payload) {
       var sessions = (payload && payload.sessions) || [];
       var defaults = (payload && payload.defaults) || {};
-      return sessions.map(function(s) {
+      var mapped = sessions.map(function(s) {
+        var key = s.key || s.sessionKey || 'main';
         var model = s.model || defaults.model || '';
         var modelParts = model ? model.split('/') : [];
         var providerName = modelParts[0] || 'zai';
         var modelName = modelParts.slice(1).join('/') || model || '';
-        // Derive state from gateway session data
         var state = s.running ? 'Running' : (s.abortedLastRun ? 'Error' : 'Idle');
+        var channel = _sessionChannel(key, s.lastChannel);
         return {
-          id: s.key || s.sessionKey || 'main',
-          name: s.key || s.sessionKey || 'Session',
-          // state is used by agents.js filteredAgents, runningCount, stoppedCount
+          id: key,
+          name: _sessionDisplayName(key, s.lastChannel),
+          channel: channel,
           state: state,
           status: s.abortedLastRun ? 'error' : 'idle',
           model: model,
@@ -520,8 +538,17 @@ var OpenFangAPI = (function() {
           identity: s.identity || {}
         };
       });
+      // Always inject a webui session entry if not already present
+      var hasWebui = mapped.some(function(a) { return a.id === 'webui'; });
+      if (!hasWebui) {
+        mapped.push({ id: 'webui', name: 'WebUI Chat', channel: 'webui', state: 'Idle', status: 'idle', model: '', model_provider: '', model_name: '', provider: '', created_at: null, last_active: null, message_count: 0, session_id: '', token_count: 0, context_tokens: 0, percent_used: 0, identity: {} });
+      }
+      return mapped;
     }).catch(function() {
-      return [{ id: 'main', name: 'DevOps Agent', state: 'Idle', status: 'idle', model_provider: 'zai', model_name: '', provider: 'zai', identity: {} }];
+      return [
+        { id: 'main', name: 'Telegram', channel: 'telegram', state: 'Idle', status: 'idle', model_provider: 'zai', model_name: '', provider: 'zai', identity: {} },
+        { id: 'webui', name: 'WebUI Chat', channel: 'webui', state: 'Idle', status: 'idle', model_provider: '', model_name: '', provider: '', identity: {} }
+      ];
     });
   }
 
@@ -717,7 +744,7 @@ var OpenFangAPI = (function() {
     }).catch(function() { return { providers: [] }; });
   }
 
-  // models — cross-check with config to determine which providers have keys configured
+  // models — merge user-configured provider models + gateway built-in list
   function getModels() {
     return Promise.all([
       request('models.list').catch(function() { return { models: [] }; }),
@@ -725,7 +752,7 @@ var OpenFangAPI = (function() {
     ]).then(function(results) {
       var p = results[0];
       var cfgPayload = results[1];
-      var models = (p && p.models) || [];
+      var gatewayModels = (p && p.models) || [];
       var cfg = (cfgPayload && cfgPayload.config) || cfgPayload || {};
       var cfgProviders = (cfg.models && cfg.models.providers) || {};
 
@@ -738,10 +765,47 @@ var OpenFangAPI = (function() {
       // Local providers (no key needed) are always "available"
       var noKeyNeeded = { ollama: true, vllm: true, lmstudio: true };
 
-      return {
-        models: models.map(function(m) {
+      // --- Inject user-configured provider models first ---
+      // These come from clawdis.json models.providers.{id}.models[]
+      var userModels = [];
+      var userModelKeys = {}; // track to avoid duplicates
+      Object.keys(cfgProviders).forEach(function(provId) {
+        var entry = cfgProviders[provId] || {};
+        var hasKey = !!(entry.apiKey && entry.apiKey.trim());
+        var modelDefs = entry.models || [];
+        modelDefs.forEach(function(m) {
+          var modelId = m.id || '';
+          if (!modelId) return;
+          var key = provId + '/' + modelId;
+          if (userModelKeys[key]) return;
+          userModelKeys[key] = true;
+          userModels.push({
+            id: modelId,
+            display_name: m.name || modelId,
+            provider: provId,
+            tier: _inferModelTier(modelId),
+            context_window: m.contextWindow || 128000,
+            max_output_tokens: m.maxTokens || 8192,
+            input_cost: m.cost ? m.cost.input : null,
+            output_cost: m.cost ? m.cost.output : null,
+            input_cost_per_m: m.cost ? m.cost.input : null,
+            output_cost_per_m: m.cost ? m.cost.output : null,
+            available: hasKey || noKeyNeeded[provId] || false
+          });
+        });
+      });
+
+      // --- Map gateway models, mark available if provider has key ---
+      var mappedGateway = gatewayModels
+        .filter(function(m) {
+          // Skip if already covered by user config
+          var id = m.id || '';
+          var provider = m.provider || 'unknown';
+          return !userModelKeys[provider + '/' + id];
+        })
+        .map(function(m) {
           var id = m.id || m.modelId || m;
-          var provider = m.provider || (typeof m === 'string' && m.split('/')[0]) || 'zai';
+          var provider = m.provider || (typeof m === 'string' && m.split('/')[0]) || 'unknown';
           var available = !!(configuredProviders[provider] || noKeyNeeded[provider]);
           var inputCost = m.inputCostPer1M || null;
           var outputCost = m.outputCostPer1M || null;
@@ -758,8 +822,10 @@ var OpenFangAPI = (function() {
             output_cost_per_m: outputCost,
             available: available
           };
-        })
-      };
+        });
+
+      // User's configured models appear first (already Available), then gateway models
+      return { models: userModels.concat(mappedGateway) };
     }).catch(function() { return { models: [] }; });
   }
 
@@ -1376,13 +1442,38 @@ var OpenFangAPI = (function() {
     // providers key
     if (path.startsWith('/api/providers/') && path.endsWith('/key')) {
       var provId = path.split('/')[3];
+
+      // Provider presets: some providers need baseUrl + model defs (not in openclaw defaults)
+      var PROVIDER_PRESETS = {
+        deepseek: {
+          baseUrl: 'https://api.deepseek.com',
+          api: 'openai-completions',
+          models: [
+            { id: 'deepseek-chat',     name: 'DeepSeek V3', reasoning: false, input: ['text'], cost: { input: 0.27, output: 1.10, cacheRead: 0.07, cacheWrite: 0 }, contextWindow: 64000, maxTokens: 8192 },
+            { id: 'deepseek-reasoner', name: 'DeepSeek R1', reasoning: true,  input: ['text'], cost: { input: 0.55, output: 2.19, cacheRead: 0.14, cacheWrite: 0 }, contextWindow: 64000, maxTokens: 8192 }
+          ]
+        },
+        zai: {
+          baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+          api: 'openai-completions',
+          models: [
+            { id: 'glm-4.7',      name: 'GLM-4.7',       reasoning: true, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 204800, maxTokens: 131072 },
+            { id: 'glm-4.7-flash',name: 'GLM-4.7 Flash', reasoning: true, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 204800, maxTokens: 131072 }
+          ]
+        }
+      };
+
+      var preset = PROVIDER_PRESETS[provId];
+      var provEntry = preset
+        ? Object.assign({}, preset, { apiKey: body.key })
+        : { apiKey: body.key };
+
       var keyPatch = { models: { providers: {} } };
-      keyPatch.models.providers[provId] = { apiKey: body.key };
+      keyPatch.models.providers[provId] = provEntry;
       return configPatch(keyPatch)
         .catch(function() {
-          // Fallback: try top-level providers key
           var fallback = { providers: {} };
-          fallback.providers[provId] = { apiKey: body.key };
+          fallback.providers[provId] = provEntry;
           return configPatch(fallback);
         });
     }
@@ -1437,68 +1528,27 @@ var OpenFangAPI = (function() {
     }
 
     // ── agents (spawn, clone, multi-session) ──
-    // POST /api/agents — spawn new agent via sessions.patch (create named session with custom model/prompt)
+    // POST /api/agents — Gateway không hỗ trợ spawn agent via sessions.patch;
+    // trả về stub, chat.js tự dùng session 'webui' mặc định.
     if (path === '/api/agents') {
-      var toml = body && body.manifest_toml || '';
-      // Parse name, provider/model, system_prompt from TOML text (simple regex extraction)
-      var nameMatch  = toml.match(/^name\s*=\s*"([^"]+)"/m);
-      var provMatch  = toml.match(/^provider\s*=\s*"([^"]+)"/m);
-      var modelMatch = toml.match(/^model\s*=\s*"([^"]+)"/m);
-      var sysMatch   = toml.match(/^system_prompt\s*=\s*"([^"]+)"/m);
-
-      var agentName  = (nameMatch && nameMatch[1]) || (body && body.name) || ('agent-' + Date.now());
-      var provider   = (provMatch && provMatch[1]) || (body && body.provider) || '';
-      var modelId    = (modelMatch && modelMatch[1]) || (body && body.model) || '';
-      var sysPrompt  = (sysMatch && sysMatch[1]) || (body && body.system_prompt) || '';
-
-      // Build session key from agent name (slug)
-      var sessionKey = agentName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || ('session-' + Date.now());
-
-      // Compose full model string if provider given separately
-      var fullModel = (provider && modelId && !modelId.includes('/'))
-        ? provider + '/' + modelId
-        : (modelId || '');
-
-      var patchParams = { key: sessionKey };
-      if (fullModel) patchParams.model = fullModel;
-      if (sysPrompt) patchParams.systemPrompt = sysPrompt;
-
-      return request('sessions.patch', patchParams).then(function() {
-        return {
-          agent_id: sessionKey,
-          name: agentName,
-          agent: { id: sessionKey, name: agentName, state: 'Idle', status: 'idle',
-                   model_provider: provider || 'zai', model_name: modelId || fullModel || '', provider: provider || 'zai' }
-        };
-      }).catch(function() {
-        // sessions.patch may fail if session already exists; that's fine
-        return {
-          agent_id: sessionKey,
-          name: agentName,
-          agent: { id: sessionKey, name: agentName, state: 'Idle', status: 'idle',
-                   model_provider: provider || 'zai', model_name: modelId || '', provider: provider || 'zai' }
-        };
+      var agentName = (body && body.name) || 'Agent';
+      var sessionKey = agentName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'webui';
+      return Promise.resolve({
+        agent_id: sessionKey,
+        name: agentName,
+        agent: { id: sessionKey, name: agentName, state: 'Idle', status: 'idle',
+                 model_provider: '', model_name: '', provider: '' }
       });
     }
-    // POST /api/agents/{id}/clone — duplicate a session under a new key
+    // POST /api/agents/{id}/clone — stub (không tạo được session thực)
     if (path.startsWith('/api/agents/') && path.endsWith('/clone')) {
       var srcId = path.split('/')[3];
-      var cloneKey = srcId + '-clone-' + Date.now();
-      return request('sessions.patch', { key: cloneKey }).then(function() {
-        return { agent_id: cloneKey, ok: true };
-      }).catch(function() {
-        return { agent_id: cloneKey, ok: true };
-      });
+      return Promise.resolve({ agent_id: srcId, ok: true });
     }
-    // POST /api/agents/{id}/sessions — create new session tab for an agent
+    // POST /api/agents/{id}/sessions — stub (Gateway không tạo được sub-session mới)
     if (path.startsWith('/api/agents/') && path.endsWith('/sessions')) {
       var baseId = path.split('/')[3];
-      var newKey = baseId + '-' + Date.now();
-      return request('sessions.patch', { key: newKey }).then(function() {
-        return { session_id: newKey, ok: true };
-      }).catch(function() {
-        return { session_id: newKey, ok: true };
-      });
+      return Promise.resolve({ session_id: baseId, ok: true });
     }
     // POST /api/agents/{id}/sessions/{sid}/switch
     if (path.startsWith('/api/agents/') && path.includes('/sessions/') && path.endsWith('/switch')) {
@@ -1760,8 +1810,8 @@ var OpenFangAPI = (function() {
   }
 
   // Route gateway chat/agent events to chat.js listeners
-  // Track per-run accumulated text to compute incremental deltas
-  var _chatRunText = {};
+  // Gateway sends cumulative text in deltas — client SETs via text_replace (idempotent, no duplicates)
+  var _chatFinalSentBySid = {}; // sid -> true once final/error emitted for this run
   onEvent(function(event, payload) {
     if (!payload) return;
     var sid = payload.sessionKey;
@@ -1770,26 +1820,32 @@ var OpenFangAPI = (function() {
     if (!cb || !cb.onMessage) return;
 
     if (event === 'chat') {
-      // Translate gateway chat event → chat.js event format
       var state = payload.state;
-      var runId = payload.runId || 'default';
+
       if (state === 'delta') {
-        // Gateway sends cumulative text; compute incremental delta for the streaming UI
+        // Gateway sends the current full text — SET (replace) the bubble content
         var fullText = payload.message && payload.message.content && payload.message.content[0] && payload.message.content[0].text || '';
-        var prevText = _chatRunText[runId] || '';
-        var delta = fullText.length > prevText.length ? fullText.slice(prevText.length) : fullText;
-        _chatRunText[runId] = fullText;
-        if (delta) cb.onMessage({ type: 'text_delta', content: delta });
-      } else if (state === 'final') {
-        var finalText = payload.message && payload.message.content && payload.message.content[0] && payload.message.content[0].text || '';
-        delete _chatRunText[runId];
-        cb.onMessage({ type: 'response', content: finalText, input_tokens: 0, output_tokens: 0 });
-      } else if (state === 'error') {
-        delete _chatRunText[runId];
-        cb.onMessage({ type: 'error', message: payload.errorMessage || 'Agent error' });
-      } else if (state === 'aborted') {
-        delete _chatRunText[runId];
-        cb.onMessage({ type: 'error', message: 'Run aborted' });
+        if (fullText) {
+          cb.onMessage({ type: 'text_replace', content: fullText });
+        }
+      } else if (state === 'final' || state === 'error' || state === 'aborted') {
+        // Deduplicate: gateway may broadcast multiple final events per run
+        if (_chatFinalSentBySid[sid]) return;
+        _chatFinalSentBySid[sid] = true;
+
+        if (state === 'final') {
+          var usage = _lastSessionUsage[sid] || {};
+          cb.onMessage({
+            type: 'response',
+            content: '',
+            input_tokens: usage.inputTokens || 0,
+            output_tokens: usage.outputTokens || 0,
+            cost_usd: usage.costUsd || 0
+          });
+          delete _lastSessionUsage[sid];
+        } else {
+          cb.onMessage({ type: 'error', message: state === 'aborted' ? 'Run aborted' : (payload.errorMessage || 'Agent error') });
+        }
       }
     } else if (event === 'agent') {
       // Pass through raw agent stream events (tool calls, phase, etc.)
@@ -1912,6 +1968,11 @@ var OpenFangAPI = (function() {
     isWsConnected: function() { return _connected; },
     getConnectionState: function() { return _connectionState; },
     onConnectionChange: onConnectionChange,
+
+    // Reset dedup state for a new run
+    setChatRunId: function(sid, _runId) {
+      delete _chatFinalSentBySid[sid];
+    },
 
     upload: function() { return Promise.reject(new Error('Upload not supported')); }
   };

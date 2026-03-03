@@ -1962,6 +1962,7 @@ export async function startGatewayServer(
     return sessionKey;
   };
   const chatRunBuffers = new Map<string, string>();
+
   const chatDeltaSentAt = new Map<string, number>();
   const chatAbortControllers = new Map<
     string,
@@ -2925,6 +2926,7 @@ export async function startGatewayServer(
           active.controller.abort();
           chatAbortControllers.delete(runId);
           chatRunBuffers.delete(runId);
+
           chatDeltaSentAt.delete(runId);
           removeChatRun(active.sessionId, runId, sessionKey);
 
@@ -4180,6 +4182,7 @@ export async function startGatewayServer(
               active.controller.abort();
               chatAbortControllers.delete(runId);
               chatRunBuffers.delete(runId);
+    
               chatDeltaSentAt.delete(runId);
               removeChatRun(active.sessionId, runId, sessionKey);
 
