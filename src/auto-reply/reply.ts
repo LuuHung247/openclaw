@@ -1874,7 +1874,7 @@ export async function getReplyFromConfig(
       blockReplyBreak: resolvedBlockStreamingBreak,
       ownerNumbers: ownerList.length > 0 ? ownerList : undefined,
       extraSystemPrompt: groupIntro || undefined,
-      enforceFinalTag: provider === "ollama" ? true : undefined,
+      enforceFinalTag: provider !== "anthropic" ? true : undefined,
     },
   };
 
@@ -2059,7 +2059,7 @@ export async function getReplyFromConfig(
         prompt: commandBody,
         extraSystemPrompt: groupIntro || undefined,
         ownerNumbers: ownerList.length > 0 ? ownerList : undefined,
-        enforceFinalTag: provider === "ollama" ? true : undefined,
+        enforceFinalTag: provider !== "anthropic" ? true : undefined,
         provider,
         model,
         thinkLevel: resolvedThinkLevel,

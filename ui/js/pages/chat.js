@@ -422,7 +422,8 @@ function chatPage() {
         if (data.messages && data.messages.length) {
           var parsed = [];
           data.messages.forEach(function(m) {
-            var role = m.role === 'User' ? 'user' : (m.role === 'System' ? 'system' : 'agent');
+            var roleStr = (m.role || '').toLowerCase();
+            var role = roleStr === 'user' ? 'user' : (roleStr === 'system' ? 'system' : 'agent');
             var content = m.content;
 
             // content is array of blocks: [{type:"text",...},{type:"thinking",...},{type:"toolCall",...},{type:"toolResult",...}]

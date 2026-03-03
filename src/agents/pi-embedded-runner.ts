@@ -423,7 +423,10 @@ export async function runEmbeddedPiAgent(params: {
           node: process.version,
           model: `${provider}/${modelId}`,
         };
-        const reasoningTagHint = provider === "ollama";
+        // Enable reasoning tag hint for all non-Anthropic providers so the model
+        // wraps internal reasoning in <think> and user-facing reply in <final>.
+        // This prevents thinking text from leaking into the chat output.
+        const reasoningTagHint = provider !== "anthropic";
         const systemPrompt = buildSystemPrompt({
           appendPrompt: buildAgentSystemPromptAppend({
             workspaceDir: resolvedWorkspace,
