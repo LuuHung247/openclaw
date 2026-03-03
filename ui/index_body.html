@@ -2409,9 +2409,35 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
 
           <!-- Providers tab -->
           <div x-show="tab === 'providers'">
+
+            <!-- Default Model selector -->
+            <div class="card mb-4" style="padding:16px 20px">
+              <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:12px">
+                <div>
+                  <div class="font-bold" style="margin-bottom:2px">Default Model</div>
+                  <div class="text-xs text-dim">Model used by default when no override is set. Only configured providers shown.</div>
+                </div>
+                <div class="flex gap-2 items-center">
+                  <select class="form-select" x-model="defaultModel" style="min-width:280px;font-family:var(--font-mono);font-size:12px">
+                    <option value="">— select a model —</option>
+                    <template x-for="m in availableModels" :key="m.id">
+                      <option :value="m.provider + '/' + m.id" x-text="m.provider + '/' + m.id"></option>
+                    </template>
+                  </select>
+                  <button class="btn btn-primary btn-sm" @click="saveDefaultModel()" :disabled="defaultModelSaving || !defaultModel">
+                    <span x-show="!defaultModelSaving">Save</span>
+                    <span x-show="defaultModelSaving" class="spinner" style="width:10px;height:10px;border-width:2px"></span>
+                  </button>
+                </div>
+              </div>
+              <div class="text-xs text-dim mt-2" x-show="availableModels.length === 0" style="color:var(--warning)">
+                No providers configured yet — add an API key below to unlock models.
+              </div>
+            </div>
+
             <div class="info-card">
               <h4>LLM Providers</h4>
-              <p>OpenFang supports 12 LLM providers out of the box. Configure API keys to unlock models from each provider. Set environment variables and restart, or use the form below to save keys directly.</p>
+              <p>Configure API keys to unlock models from each provider. Set environment variables and restart, or use the form below to save keys directly to config.</p>
             </div>
             <div class="card-grid">
               <template x-for="p in providers" :key="p.id">
@@ -2506,6 +2532,10 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                   <option :value="t" x-text="t"></option>
                 </template>
               </select>
+              <label class="flex items-center gap-1" style="cursor:pointer;white-space:nowrap;font-size:13px">
+                <input type="checkbox" x-model="modelAvailableOnly" style="accent-color:var(--accent)">
+                Available only
+              </label>
               <button class="btn btn-primary btn-sm" @click="showCustomModelForm = !showCustomModelForm" x-text="showCustomModelForm ? 'Cancel' : '+ Custom Model'"></button>
             </div>
             <!-- Custom model form -->

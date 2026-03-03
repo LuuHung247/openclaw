@@ -10,10 +10,13 @@ function settingsPage() {
     config: {},
     providers: [],
     models: [],
+    defaultModel: '',
+    defaultModelSaving: false,
     toolSearch: '',
     modelSearch: '',
     modelProviderFilter: '',
     modelTierFilter: '',
+    modelAvailableOnly: false,
     showCustomModelForm: false,
     customModelId: '',
     customModelProvider: 'openrouter',
@@ -215,7 +218,22 @@ function settingsPage() {
     async loadConfig() {
       try {
         this.config = await OpenFangAPI.get('/api/config');
+        // Read current default model from config
+        var agentModel = (this.config.agent && this.config.agent.model) || '';
+        if (agentModel) this.defaultModel = agentModel;
       } catch(e) { this.config = {}; }
+    },
+
+    async saveDefaultModel() {
+      if (!this.defaultModel) return;
+      this.defaultModelSaving = true;
+      try {
+        await OpenFangAPI.post('/api/config', { agent: { model: this.defaultModel } });
+        OpenFangToast.success('Default model saved: ' + this.defaultModel);
+      } catch(e) {
+        OpenFangToast.error('Failed to save model: ' + e.message);
+      }
+      this.defaultModelSaving = false;
     },
 
     async loadProviders() {
@@ -240,7 +258,16 @@ function settingsPage() {
       try {
         var data = await OpenFangAPI.get('/api/models');
         this.models = data.models || [];
+        // If no defaultModel set yet, pick first available
+        if (!this.defaultModel) {
+          var first = this.models.find(function(m) { return m.available; });
+          if (first) this.defaultModel = first.provider + '/' + first.id;
+        }
       } catch(e) { this.models = []; }
+    },
+
+    get availableModels() {
+      return this.models.filter(function(m) { return m.available; });
     },
 
     async addCustomModel() {
@@ -311,6 +338,7 @@ function settingsPage() {
     get filteredModels() {
       var self = this;
       return this.models.filter(function(m) {
+        if (self.modelAvailableOnly && !m.available) return false;
         if (self.modelProviderFilter && m.provider !== self.modelProviderFilter) return false;
         if (self.modelTierFilter && m.tier !== self.modelTierFilter) return false;
         if (self.modelSearch) {

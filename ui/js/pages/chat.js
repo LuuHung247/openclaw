@@ -378,12 +378,9 @@ function chatPage() {
     },
 
     async autoLoadAgent() {
-      var store = Alpine.store('app');
-      await store.refreshAgents();
-      var agents = store.agents || [];
-      if (agents.length > 0) {
-        this.selectAgent(agents[0]);
-      }
+      // WebUI always uses a dedicated 'webui' session to avoid conflict with Telegram/other channels
+      var webuiAgent = { id: 'webui', name: 'WebUI Chat', state: 'Idle', status: 'idle', model_provider: '', model_name: '', provider: '', identity: {} };
+      this.selectAgent(webuiAgent);
     },
 
     selectAgent(agent) {
@@ -758,7 +755,7 @@ function chatPage() {
         case 'error':
           this._clearTypingTimeout();
           this.messages = this.messages.filter(function(m) { return !m.thinking && !m.streaming; });
-          this.messages.push({ id: ++msgId, role: 'system', text: 'Error: ' + data.content, meta: '', tools: [], ts: Date.now() });
+          this.messages.push({ id: ++msgId, role: 'system', text: 'Error: ' + (data.message || data.content || 'unknown'), meta: '', tools: [], ts: Date.now() });
           this.sending = false;
           this.tokenCount = 0;
           this.scrollToBottom();
@@ -898,40 +895,60 @@ function chatPage() {
 
     async _sendPayload(finalText, uploadedFiles, msgImages) {
       this.sending = true;
+      var self = this;
+      var sessionKey = this.currentAgent ? this.currentAgent.id : 'main';
 
-      // Try WebSocket first
-      var wsPayload = { type: 'message', content: finalText };
-      if (uploadedFiles && uploadedFiles.length) wsPayload.attachments = uploadedFiles;
-      if (OpenFangAPI.wsSend(wsPayload)) {
-        this.messages.push({ id: ++msgId, role: 'agent', text: '', meta: '', thinking: true, streaming: true, tools: [], ts: Date.now() });
-        this.scrollToBottom();
+      // Show thinking indicator
+      this.messages.push({ id: ++msgId, role: 'agent', text: '', meta: '', thinking: true, streaming: true, tools: [], ts: Date.now() });
+      this.scrollToBottom();
+
+      // Use chat.send RPC for streaming (gateway emits 'chat' events back to all clients)
+      if (OpenFangAPI.isWsConnected()) {
+        try {
+          var chatParams = {
+            sessionKey: sessionKey,
+            message: finalText,
+            idempotencyKey: 'ui-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+            thinking: this.thinkingMode !== 'off' ? this.thinkingMode : undefined,
+            timeoutMs: 30000
+          };
+          if (uploadedFiles && uploadedFiles.length) chatParams.attachments = uploadedFiles;
+          // chat.send blocks until agent run completes; 'chat' events stream in the meantime
+          await OpenFangAPI.request('chat.send', chatParams, 600000);
+          // By the time chat.send resolves, the 'final' chat event has already handled the response
+        } catch(e) {
+          // Only show error if not already handled by chat event (sending may already be false)
+          if (self.sending) {
+            self.messages = self.messages.filter(function(m) { return !m.thinking && !m.streaming; });
+            self.messages.push({ id: ++msgId, role: 'system', text: 'Error: ' + (e.message || 'Send failed'), meta: '', tools: [], ts: Date.now() });
+            self.sending = false;
+            self.scrollToBottom();
+            self.$nextTick(function() {
+              var el = document.getElementById('msg-input'); if (el) el.focus();
+              self._processQueue();
+            });
+          }
+        }
         return;
       }
 
-      // HTTP fallback
-      if (!OpenFangAPI.isWsConnected()) {
-        OpenFangToast.info('Using HTTP mode (no streaming)');
-      }
-      this.messages.push({ id: ++msgId, role: 'agent', text: '', meta: '', thinking: true, tools: [], ts: Date.now() });
-      this.scrollToBottom();
-
+      // HTTP fallback (no streaming)
+      OpenFangToast.info('Using HTTP mode (no streaming)');
       try {
         var httpBody = { message: finalText };
         if (uploadedFiles && uploadedFiles.length) httpBody.attachments = uploadedFiles;
-        var res = await OpenFangAPI.post('/api/agents/' + this.currentAgent.id + '/message', httpBody);
-        this.messages = this.messages.filter(function(m) { return !m.thinking; });
+        var res = await OpenFangAPI.post('/api/agents/' + sessionKey + '/message', httpBody);
+        this.messages = this.messages.filter(function(m) { return !m.thinking && !m.streaming; });
         var httpMeta = (res.input_tokens || 0) + ' in / ' + (res.output_tokens || 0) + ' out';
         if (res.cost_usd != null) httpMeta += ' | $' + res.cost_usd.toFixed(4);
         if (res.iterations) httpMeta += ' | ' + res.iterations + ' iter';
-        this.messages.push({ id: ++msgId, role: 'agent', text: res.response, meta: httpMeta, tools: [], ts: Date.now() });
+        this.messages.push({ id: ++msgId, role: 'agent', text: res.response || '', meta: httpMeta, tools: [], ts: Date.now() });
       } catch(e) {
-        this.messages = this.messages.filter(function(m) { return !m.thinking; });
+        this.messages = this.messages.filter(function(m) { return !m.thinking && !m.streaming; });
         this.messages.push({ id: ++msgId, role: 'system', text: 'Error: ' + e.message, meta: '', tools: [], ts: Date.now() });
       }
       this.sending = false;
       this.scrollToBottom();
-      // Process next queued message
-      var self = this;
       this.$nextTick(function() {
         var el = document.getElementById('msg-input'); if (el) el.focus();
         self._processQueue();

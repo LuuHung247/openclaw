@@ -717,14 +717,34 @@ var OpenFangAPI = (function() {
     }).catch(function() { return { providers: [] }; });
   }
 
-  // models
+  // models — cross-check with config to determine which providers have keys configured
   function getModels() {
-    return request('models.list').then(function(p) {
+    return Promise.all([
+      request('models.list').catch(function() { return { models: [] }; }),
+      request('config.get', {}).catch(function() { return {}; })
+    ]).then(function(results) {
+      var p = results[0];
+      var cfgPayload = results[1];
       var models = (p && p.models) || [];
+      var cfg = (cfgPayload && cfgPayload.config) || cfgPayload || {};
+      var cfgProviders = (cfg.models && cfg.models.providers) || {};
+
+      // Build set of providers that have a key configured
+      var configuredProviders = {};
+      Object.keys(cfgProviders).forEach(function(pid) {
+        var entry = cfgProviders[pid] || {};
+        if (entry.apiKey && entry.apiKey.trim()) configuredProviders[pid] = true;
+      });
+      // Local providers (no key needed) are always "available"
+      var noKeyNeeded = { ollama: true, vllm: true, lmstudio: true };
+
       return {
         models: models.map(function(m) {
           var id = m.id || m.modelId || m;
           var provider = m.provider || (typeof m === 'string' && m.split('/')[0]) || 'zai';
+          var available = !!(configuredProviders[provider] || noKeyNeeded[provider]);
+          var inputCost = m.inputCostPer1M || null;
+          var outputCost = m.outputCostPer1M || null;
           return {
             id: id,
             display_name: m.displayName || m.name || id,
@@ -732,11 +752,11 @@ var OpenFangAPI = (function() {
             tier: _inferModelTier(id),
             context_window: m.contextWindow || m.contextLength || 128000,
             max_output_tokens: m.maxOutputTokens || 8192,
-            input_cost: m.inputCostPer1M || null,
-            output_cost: m.outputCostPer1M || null,
-            // available=true means the API key for this provider is configured
-            // Gateway only returns models it can actually use
-            available: true
+            input_cost: inputCost,
+            output_cost: outputCost,
+            input_cost_per_m: inputCost,
+            output_cost_per_m: outputCost,
+            available: available
           };
         })
       };
@@ -1739,12 +1759,59 @@ var OpenFangAPI = (function() {
     return false;
   }
 
-  // Route gateway agent events to chat.js listeners
+  // Route gateway chat/agent events to chat.js listeners
+  // Track per-run accumulated text to compute incremental deltas
+  var _chatRunText = {};
   onEvent(function(event, payload) {
-    if (event === 'agent') {
-      var sid = payload && payload.sessionKey;
-      var cb = _agentEventListeners[sid] || _agentEventListeners['main'];
-      if (cb && cb.onMessage) cb.onMessage({ type: 'agent', payload: payload });
+    if (!payload) return;
+    var sid = payload.sessionKey;
+    // Only route to the exact session listener — no fallback to avoid cross-session leakage
+    var cb = _agentEventListeners[sid];
+    if (!cb || !cb.onMessage) return;
+
+    if (event === 'chat') {
+      // Translate gateway chat event → chat.js event format
+      var state = payload.state;
+      var runId = payload.runId || 'default';
+      if (state === 'delta') {
+        // Gateway sends cumulative text; compute incremental delta for the streaming UI
+        var fullText = payload.message && payload.message.content && payload.message.content[0] && payload.message.content[0].text || '';
+        var prevText = _chatRunText[runId] || '';
+        var delta = fullText.length > prevText.length ? fullText.slice(prevText.length) : fullText;
+        _chatRunText[runId] = fullText;
+        if (delta) cb.onMessage({ type: 'text_delta', content: delta });
+      } else if (state === 'final') {
+        var finalText = payload.message && payload.message.content && payload.message.content[0] && payload.message.content[0].text || '';
+        delete _chatRunText[runId];
+        cb.onMessage({ type: 'response', content: finalText, input_tokens: 0, output_tokens: 0 });
+      } else if (state === 'error') {
+        delete _chatRunText[runId];
+        cb.onMessage({ type: 'error', message: payload.errorMessage || 'Agent error' });
+      } else if (state === 'aborted') {
+        delete _chatRunText[runId];
+        cb.onMessage({ type: 'error', message: 'Run aborted' });
+      }
+    } else if (event === 'agent') {
+      // Pass through raw agent stream events (tool calls, phase, etc.)
+      var stream = payload.stream;
+      if (stream === 'tool') {
+        var phase = payload.data && payload.data.phase;
+        var toolName = payload.data && payload.data.name || '';
+        if (phase === 'start') {
+          cb.onMessage({ type: 'tool_start', tool: toolName });
+        } else if (phase === 'end') {
+          cb.onMessage({ type: 'tool_end', tool: toolName, input: payload.data && typeof payload.data.input !== 'undefined' ? JSON.stringify(payload.data.input) : '' });
+        } else if (phase === 'result') {
+          var result = payload.data && payload.data.result;
+          var resultStr = typeof result === 'string' ? result : JSON.stringify(result || '');
+          cb.onMessage({ type: 'tool_result', tool: toolName, result: resultStr, is_error: !!(payload.data && payload.data.isError) });
+        }
+      } else if (stream === 'job') {
+        var jobState = payload.data && payload.data.state;
+        if (jobState === 'thinking') {
+          cb.onMessage({ type: 'typing', state: 'start' });
+        }
+      }
     }
   });
 
@@ -1838,6 +1905,7 @@ var OpenFangAPI = (function() {
       });
     },
 
+    request: request,
     wsConnect: wsConnect,
     wsDisconnect: wsDisconnect,
     wsSend: wsSend,
