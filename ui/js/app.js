@@ -206,7 +206,7 @@ function app() {
       });
 
       // Hash routing — DevOps edition (Hands/Comms/Wizard removed)
-      var validPages = ['overview','agents','sessions','approvals','workflows','scheduler','channels','skills','analytics','logs','settings'];
+      var validPages = ['overview','agents','chat','sessions','approvals','workflows','scheduler','channels','skills','analytics','logs','settings'];
       var pageRedirects = {
         'chat': 'agents',
         'templates': 'agents',
@@ -234,15 +234,15 @@ function app() {
 
       // Keyboard shortcuts
       document.addEventListener('keydown', function(e) {
-        // Ctrl+K — focus agent switch / go to agents
+        // Ctrl+K — focus chat
         if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
           e.preventDefault();
-          self.navigate('agents');
+          self.navigate('chat');
         }
-        // Ctrl+N — new agent
+        // Ctrl+N — go to chat
         if ((e.ctrlKey || e.metaKey) && e.key === 'n' && !e.shiftKey) {
           e.preventDefault();
-          self.navigate('agents');
+          self.navigate('chat');
         }
         // Ctrl+Shift+F — toggle focus mode
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {

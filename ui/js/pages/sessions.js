@@ -28,11 +28,12 @@ function sessionsPage() {
       try {
         var data = await OpenFangAPI.get('/api/sessions');
         var sessions = data.sessions || [];
-        var agents = Alpine.store('app').agents;
-        var agentMap = {};
-        agents.forEach(function(a) { agentMap[a.id] = a.name; });
-        sessions.forEach(function(s) {
-          s.agent_name = agentMap[s.agent_id] || '';
+        // session_key is the primary ID in openclaw; map agent_id → session_key for compatibility
+        sessions = sessions.map(function(s) {
+          if (!s.session_id) s.session_id = s.session_key || s.agent_id;
+          if (!s.agent_id) s.agent_id = s.session_key;
+          s.agent_name = s.agent_id || s.session_key || '';
+          return s;
         });
         this.sessions = sessions;
       } catch(e) {
@@ -54,20 +55,30 @@ function sessionsPage() {
     },
 
     openInChat(session) {
+      var sessionKey = session.session_key || session.agent_id || session.session_id;
       var agents = Alpine.store('app').agents;
-      var agent = agents.find(function(a) { return a.id === session.agent_id; });
+      var agent = agents.find(function(a) { return a.id === sessionKey; });
       if (agent) {
         Alpine.store('app').pendingAgent = agent;
+      } else if (sessionKey) {
+        // Create a minimal agent object so chat page can open it
+        Alpine.store('app').pendingAgent = { id: sessionKey, name: session.agent_name || sessionKey };
       }
       location.hash = 'agents';
     },
 
-    deleteSession(sessionId) {
+    deleteSession(session) {
       var self = this;
+      // Accept either a session object or a raw id string for backwards compat
+      var sessionKey = (session && typeof session === 'object')
+        ? (session.session_key || session.agent_id || session.session_id || session)
+        : session;
       OpenFangToast.confirm('Delete Session', 'This will permanently remove the session and its messages.', async function() {
         try {
-          await OpenFangAPI.del('/api/sessions/' + sessionId);
-          self.sessions = self.sessions.filter(function(s) { return s.session_id !== sessionId; });
+          await OpenFangAPI.del('/api/sessions/' + sessionKey);
+          self.sessions = self.sessions.filter(function(s) {
+            return (s.session_key || s.agent_id || s.session_id) !== sessionKey;
+          });
           OpenFangToast.success('Session deleted');
         } catch(e) {
           OpenFangToast.error('Failed to delete session: ' + e.message);
@@ -81,7 +92,8 @@ function sessionsPage() {
       this.memLoading = true;
       this.memLoadError = '';
       try {
-        var data = await OpenFangAPI.get('/api/memory/agents/' + this.memAgentId + '/kv');
+        // api.js getMemoryKv uses localStorage-backed in-memory store
+        var data = await OpenFangAPI.get('/api/memory/agents/' + encodeURIComponent(this.memAgentId) + '/kv');
         this.kvPairs = data.kv_pairs || [];
       } catch(e) {
         this.kvPairs = [];

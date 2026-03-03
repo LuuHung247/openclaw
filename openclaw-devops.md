@@ -174,111 +174,55 @@ Truy cập sau khi gateway chạy: `http://localhost:18789/ui`
 
 ---
 
-## 5. Chạy với Docker
+## 5. Chạy local (dev)
 
-Files có sẵn trong repo: `Dockerfile`, `docker-compose.yml`.
+> **Không dùng Docker cho local dev nữa.** Onboard hoàn toàn qua Web UI.
 
-```
-Base image: node:22-bookworm
-Build:      pnpm install --frozen-lockfile && pnpm build
-CMD:        node dist/index.js
-Image name: clawdis:local  (override bằng env CLAWDIS_IMAGE)
-```
-
-### Bước 1 — Tạo config/workspace trên host
+### Bước 1 — Tạo workspace
 
 ```bash
 mkdir -p ~/.clawdis ~/clawd
 ```
 
-Tạo `~/.clawdis/clawdis.json` tối thiểu:
+`~/.clawdis/clawdis.json` tối thiểu (auth off, bind lan):
 
-```json5
+```json
 {
-  agent: { workspace: "/home/node/clawd" },
-  telegram: { botToken: "YOUR_BOT_TOKEN" },
-  gateway: { mode: "local", bind: "lan" }
+  "agent": { "workspace": "/home/<user>/clawd" },
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "auth": { "mode": "none" }
+  },
+  "skills": { "install": { "nodeManager": "npm" } }
 }
 ```
 
-### Bước 2 — Build image
+### Bước 2 — Start gateway
 
 ```bash
-docker build -t clawdis:local .
+pnpm start gateway
 ```
 
-### Bước 3 — Onboard qua docker compose
+### Bước 3 — Onboard qua Web UI
 
-```bash
-export CLAWDIS_CONFIG_DIR=~/.clawdis
-export CLAWDIS_WORKSPACE_DIR=~/clawd
-export CLAWDIS_GATEWAY_TOKEN=$(openssl rand -hex 32)
+Mở browser: `http://localhost:18789/ui`
 
-docker compose run --rm clawdis-cli onboard
-```
+- **Channels** → Telegram → nhập bot token → Save
+- **Settings** → chọn model provider + API key
+- Không cần chạy `pnpm onboard` hay `docker compose run --rm clawdis-cli onboard` nữa
 
-> Trong wizard: chọn **Gateway bind = lan**, **auth = token**, paste token ở trên, **Tailscale = off**, **Install daemon = No**.
+### Stop
 
-### Bước 4 — Start gateway
-
-```bash
-docker compose up -d clawdis-gateway
-docker compose logs -f clawdis-gateway
-```
-
-### Stop / restart
-
-```bash
-docker compose down
-docker compose restart clawdis-gateway
-```
-
-### Volumes
-
-| Env var | Default | Mount trong container | Mục đích |
-|---------|---------|-----------------------|----------|
-| `CLAWDIS_CONFIG_DIR` | `~/.clawdis` | `/home/node/.clawdis` | Config JSON, session store, Telegram credentials |
-| `CLAWDIS_WORKSPACE_DIR` | `~/clawd` | `/home/node/clawd` | Agent workspace, skills, memory files |
+`Ctrl+C` trong terminal.
 
 ### Ports
 
-| Env var | Default host | Container | Dùng cho |
-|---------|-------------|-----------|----------|
-| `CLAWDIS_GATEWAY_PORT` | `18789` | `18789` | Gateway WebSocket + Dashboard UI (`/ui`) |
-| `CLAWDIS_BRIDGE_PORT` | `18790` | `18790` | Bridge port (optional, có thể tắt) |
-
-### Env vars cần export trước khi `docker compose`
-
-```bash
-export CLAWDIS_CONFIG_DIR=~/.clawdis
-export CLAWDIS_WORKSPACE_DIR=~/clawd
-export CLAWDIS_GATEWAY_TOKEN=<hex-token>   # bắt buộc nếu dùng auth
-export CLAWDIS_GATEWAY_BIND=lan            # lan | loopback | tailnet | auto
-# export CLAWDIS_GATEWAY_PORT=18789        # nếu muốn đổi port
-```
-
-Hoặc lưu vào `.env` rồi docker compose tự load.
-
-### Test sau khi chạy
-
-```bash
-# Dashboard UI
-curl -I http://localhost:18789/ui
-
-# Health check qua CLI trong container
-docker compose exec clawdis-gateway \
-  node dist/index.js health --token "$CLAWDIS_GATEWAY_TOKEN"
-
-# Gửi message test
-docker compose exec clawdis-gateway \
-  node dist/index.js agent --message "ping"
-
-# Shell vào container
-docker compose exec clawdis-gateway bash
-
-# Logs realtime
-docker compose logs -f clawdis-gateway
-```
+| Port | Dùng cho |
+|------|----------|
+| `18789` | Gateway WebSocket + Dashboard UI (`/ui`) |
+| `18790` | Bridge (node pairing, có thể bỏ qua) |
+| `18791` | Browser control (local only) |
 
 ---
 
@@ -408,3 +352,116 @@ OpenFangAPI.post('/api/sessions/' + id + '/reset', {})
 | Channels | Multi-channel (Telegram, Discord, Slack...) | Telegram only |
 | Migration | Native support | Không support (openclaw là target) |
 | Identity | `agent.identity.emoji` from DB | `session.identity` từ config |
+
+---
+
+## 8. API Shim — Conflict Resolution (Session 3)
+
+Sau khi explore toàn bộ openfang (60+ REST endpoints, 15 pages) vs openclaw Gateway (70+ WS methods), đã implement các fixes sau trong `ui/js/api.js`:
+
+### 8.1 Agent Spawn (POST /api/agents)
+
+**Trước:** Return stub `{ agent_id: 'main' }` cứng — wizard spawn không có tác dụng gì.
+
+**Sau:** Parse manifest TOML text để lấy `name`, `provider`, `model`, `system_prompt`, rồi gọi `sessions.patch` để tạo session mới với key = slug của tên agent.
+
+```javascript
+// Parse từ TOML manifest
+var agentName = toml.match(/^name\s*=\s*"([^"]+)"/m);
+var sessionKey = agentName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+request('sessions.patch', { key: sessionKey, displayName: agentName });
+```
+
+> **Lưu ý:** Gateway `sessions.patch` không support `model` field trực tiếp. Model được set qua `config.set { agent: { model } }` — áp dụng globally cho tất cả sessions.
+
+### 8.2 Model Selector (PUT /api/agents/{id}/model)
+
+**Trước:** Dùng `sessions.patch` với `model` field — không hoạt động vì Gateway không accept field này.
+
+**Sau:** Dùng `config.set` với `patch: { agent: { model } }` — set default model cho toàn bộ gateway.
+
+Chat page `/model` command và model picker đều hoạt động. Field `available: true` được thêm vào tất cả models từ `models.list` (Gateway chỉ trả về models có key).
+
+### 8.3 In-Memory KV Store (Sessions page)
+
+Gateway không có session-level KV endpoint. Implement `_kvStore` backed bởi `localStorage`:
+
+```javascript
+var _kvStore = (function() {
+  // Persist to localStorage key 'openclaw-kv-store'
+  // Per-agent namespacing: _data[agentId][key] = value
+})();
+```
+
+- `GET /api/memory/agents/{id}/kv` → `_kvStore.list(agentId)`
+- `PUT /api/memory/agents/{id}/kv/{key}` → `_kvStore.set(agentId, key, value)`
+- `DELETE /api/memory/agents/{id}/kv/{key}` → `_kvStore.del(agentId, key)`
+
+Ngoài ra KV store được dùng để lưu identity (emoji, color, archetype, vibe) và system_prompt của agents.
+
+### 8.4 In-Memory Trigger Store (Scheduler page)
+
+Gateway không có trigger concept. Implement `_triggers` array in-memory:
+
+- `GET /api/triggers` → list triggers
+- `POST /api/triggers` → tạo trigger mới
+- `PUT /api/triggers/{id}` → update trigger
+- `DELETE /api/triggers/{id}` → xóa trigger
+
+Triggers chỉ tồn tại trong session browser — không persist qua page reload (khác cron jobs được lưu trong gateway).
+
+### 8.5 In-Memory Workflow Store
+
+Tương tự triggers, workflow DAG được lưu in-memory. Khi run workflow, step đầu tiên có `message` field sẽ được gửi như một agent message.
+
+### 8.6 Agent Config PATCH (/api/agents/{id}/config)
+
+`PATCH /api/agents/{id}/config` từ agents page gửi `{ emoji, color, archetype, vibe, name, model }`:
+
+| Field | Xử lý |
+|-------|-------|
+| `name` | `sessions.patch { displayName }` |
+| `model` | `config.set { agent: { model } }` |
+| `system_prompt` | Lưu vào KV store (`__system_prompt__`) |
+| `emoji`, `color`, `archetype`, `vibe` | Lưu vào KV store (`__identity_{field}__`) |
+
+### 8.7 MCP Servers & Tools
+
+- `GET /api/mcp/servers` → filter từ skills có "mcp" hoặc "server" trong tên
+- `GET /api/tools` → **fix**: trước đây chỉ hiện skills có `tools_count > 0` (luôn là 0), nay hiện tất cả `eligible` skills vì mỗi skill expose ít nhất 1 tool
+
+### 8.8 Danh sách đầy đủ endpoints đã implement
+
+| Method | Path | Gateway | Ghi chú |
+|--------|------|---------|---------|
+| GET | `/api/triggers` | In-memory | Mới |
+| POST | `/api/triggers` | In-memory | Mới |
+| PUT | `/api/triggers/{id}` | In-memory | Mới |
+| DELETE | `/api/triggers/{id}` | In-memory | Mới |
+| GET | `/api/workflows` | In-memory | Mới |
+| POST | `/api/workflows` | In-memory | Mới |
+| PUT | `/api/workflows/{id}` | In-memory | Mới |
+| POST | `/api/workflows/{id}/run` | Sends first step as message | Mới |
+| GET | `/api/memory/agents/{id}/kv` | localStorage KV | Mới |
+| PUT | `/api/memory/agents/{id}/kv/{key}` | localStorage KV | Mới |
+| DELETE | `/api/memory/agents/{id}/kv/{key}` | localStorage KV | Mới |
+| POST | `/api/agents` | `sessions.patch` | Fix: tạo session thực |
+| POST | `/api/agents/{id}/clone` | `sessions.patch` new key | Fix |
+| PUT | `/api/agents/{id}/model` | `config.set` | Fix: dùng config.set thay sessions.patch |
+| PATCH | `/api/agents/{id}/config` | Multi-dispatch | Fix: name/model/identity/soul |
+| GET | `/api/models` | `models.list` + `available:true` | Fix: thêm available field |
+| GET | `/api/mcp/servers` | Derived từ skills | Fix: filter skill names |
+| GET | `/api/tools` | All eligible skills | Fix: bỏ tools_count filter |
+
+### 8.9 Build lại Docker
+
+```bash
+cd /path/to/openclaw
+docker build --no-cache -t clawdis:local .
+docker compose down && docker compose up -d clawdis-gateway
+```
+
+Quick update (không rebuild):
+```bash
+docker cp ui/js/api.js <container>:/app/ui/js/api.js
+```

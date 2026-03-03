@@ -19,7 +19,9 @@ function workflowsPage() {
       this.loading = true;
       this.loadError = '';
       try {
-        this.workflows = await OpenFangAPI.get('/api/workflows');
+        var data = await OpenFangAPI.get('/api/workflows');
+        // getWorkflows() returns plain array; normalize both shapes
+        this.workflows = Array.isArray(data) ? data : (data.workflows || []);
       } catch(e) {
         this.workflows = [];
         this.loadError = e.message || 'Could not load workflows.';

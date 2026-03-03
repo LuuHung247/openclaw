@@ -312,8 +312,9 @@ function agentsPage() {
     },
 
     closeChat() {
+      var agent = this.activeChatAgent;
       this.activeChatAgent = null;
-      OpenFangAPI.wsDisconnect();
+      if (agent) OpenFangAPI.wsDisconnect(agent.id);
     },
 
     showDetail(agent) {
@@ -541,8 +542,8 @@ function agentsPage() {
       var newName = (agent.name || 'agent') + '-copy';
       try {
         var res = await OpenFangAPI.post('/api/agents/' + agent.id + '/clone', { new_name: newName });
-        if (res.agent_id) {
-          OpenFangToast.success('Cloned as "' + res.name + '"');
+        if (res.agent_id || res.ok) {
+          OpenFangToast.success('Cloned as "' + (res.name || newName) + '"');
           await Alpine.store('app').refreshAgents();
           this.showDetailModal = false;
         }
@@ -606,7 +607,15 @@ function agentsPage() {
       if (!this.detailAgent) return;
       this.toolFiltersLoading = true;
       try {
-        this.toolFilters = await OpenFangAPI.get('/api/agents/' + this.detailAgent.id + '/tools');
+        var data = await OpenFangAPI.get('/api/agents/' + this.detailAgent.id + '/tools');
+        // Normalize: openclaw returns {tools:[{name,enabled}]}, openfang returns {tool_allowlist:[], tool_blocklist:[]}
+        if (data.tool_allowlist !== undefined || data.tool_blocklist !== undefined) {
+          this.toolFilters = { tool_allowlist: data.tool_allowlist || [], tool_blocklist: data.tool_blocklist || [] };
+        } else {
+          // Build from tools list: enabled=false means blocked
+          var blocklist = (data.tools || []).filter(function(t) { return t.enabled === false; }).map(function(t) { return t.name; });
+          this.toolFilters = { tool_allowlist: [], tool_blocklist: blocklist };
+        }
       } catch(e) {
         this.toolFilters = { tool_allowlist: [], tool_blocklist: [] };
       }

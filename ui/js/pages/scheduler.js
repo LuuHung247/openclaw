@@ -62,27 +62,40 @@ function schedulerPage() {
     },
 
     async loadJobs() {
+      // Gateway cron.list returns flat: [{id, name, schedule, command, sessionKey, enabled, lastRun, nextRun}]
+      // openfang /api/cron/jobs returns nested: [{id, name, schedule:{kind,expr}, action:{message}, agent_id, ...}]
+      // api.js wraps both as { jobs: [...] }
       var data = await OpenFangAPI.get('/api/cron/jobs');
-      var raw = data.jobs || [];
-      // Normalize cron API response to flat fields the UI expects
+      var raw = data.jobs || data || [];
       this.jobs = raw.map(function(j) {
+        // Handle both flat (gateway) and nested (openfang) shapes
         var cron = '';
         if (j.schedule) {
-          if (j.schedule.kind === 'cron') cron = j.schedule.expr || '';
-          else if (j.schedule.kind === 'every') cron = 'every ' + j.schedule.every_secs + 's';
-          else if (j.schedule.kind === 'at') cron = 'at ' + (j.schedule.at || '');
+          if (typeof j.schedule === 'string') {
+            cron = j.schedule;
+          } else if (j.schedule.kind === 'cron') {
+            cron = j.schedule.expr || '';
+          } else if (j.schedule.kind === 'every') {
+            cron = 'every ' + j.schedule.every_secs + 's';
+          } else if (j.schedule.kind === 'at') {
+            cron = 'at ' + (j.schedule.at || '');
+          }
         }
+        // message: gateway uses j.command, openfang uses j.action.message
+        var message = j.command || (j.action ? j.action.message || '' : '') || '';
+        // agent_id: gateway uses j.sessionKey, openfang uses j.agent_id
+        var agentId = j.agent_id || j.sessionKey || '';
         return {
           id: j.id,
           name: j.name,
           cron: cron,
-          agent_id: j.agent_id,
-          message: j.action ? j.action.message || '' : '',
-          enabled: j.enabled,
-          last_run: j.last_run,
-          next_run: j.next_run,
-          delivery: j.delivery ? j.delivery.kind || '' : '',
-          created_at: j.created_at
+          agent_id: agentId,
+          message: message,
+          enabled: j.enabled !== false,
+          last_run: j.last_run || j.lastRun || null,
+          next_run: j.next_run || j.nextRun || null,
+          delivery: j.delivery ? (j.delivery.kind || '') : '',
+          created_at: j.created_at || null
         };
       });
     },
@@ -154,12 +167,15 @@ function schedulerPage() {
       this.creating = true;
       try {
         var jobName = this.newJob.name;
+        // api.js createCronJob maps: name, schedule/cron, command/message, sessionKey/agent_id, enabled
         var body = {
-          agent_id: this.newJob.agent_id,
           name: this.newJob.name,
-          schedule: { kind: 'cron', expr: this.newJob.cron },
-          action: { kind: 'agent_turn', message: this.newJob.message || 'Scheduled task: ' + this.newJob.name },
-          delivery: { kind: 'last_channel' },
+          schedule: this.newJob.cron,
+          cron: this.newJob.cron,
+          command: this.newJob.message || 'Scheduled task: ' + this.newJob.name,
+          message: this.newJob.message || 'Scheduled task: ' + this.newJob.name,
+          sessionKey: this.newJob.agent_id || 'main',
+          agent_id: this.newJob.agent_id || 'main',
           enabled: this.newJob.enabled
         };
         await OpenFangAPI.post('/api/cron/jobs', body);
@@ -176,7 +192,7 @@ function schedulerPage() {
     async toggleJob(job) {
       try {
         var newState = !job.enabled;
-        await OpenFangAPI.put('/api/cron/jobs/' + job.id + '/enable', { enabled: newState });
+        await OpenFangAPI.put('/api/cron/jobs/' + job.id, { enabled: newState });
         job.enabled = newState;
         OpenFangToast.success('Schedule ' + (newState ? 'enabled' : 'paused'));
       } catch(e) {
@@ -201,15 +217,11 @@ function schedulerPage() {
     async runNow(job) {
       this.runningJobId = job.id;
       try {
-        var result = await OpenFangAPI.post('/api/schedules/' + job.id + '/run', {});
-        if (result.status === 'completed') {
-          OpenFangToast.success('Schedule "' + (job.name || 'job') + '" executed successfully');
-          job.last_run = new Date().toISOString();
-        } else {
-          OpenFangToast.error('Schedule run failed: ' + (result.error || 'Unknown error'));
-        }
+        var result = await OpenFangAPI.post('/api/cron/jobs/' + job.id + '/run', {});
+        OpenFangToast.success('Schedule "' + (job.name || 'job') + '" triggered');
+        job.last_run = new Date().toISOString();
       } catch(e) {
-        OpenFangToast.error('Run Now is not yet available for cron jobs');
+        OpenFangToast.error('Failed to run job: ' + (e.message || e));
       }
       this.runningJobId = '';
     },

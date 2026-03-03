@@ -179,18 +179,23 @@ function settingsPage() {
 
     async loadSysInfo() {
       try {
-        var ver = await OpenFangAPI.get('/api/version');
-        var status = await OpenFangAPI.get('/api/status');
+        var results = await Promise.all([
+          OpenFangAPI.get('/api/version').catch(function() { return {}; }),
+          OpenFangAPI.get('/api/status').catch(function() { return {}; })
+        ]);
+        var ver = results[0]; var status = results[1];
         this.sysInfo = {
-          version: ver.version || '-',
-          platform: ver.platform || '-',
-          arch: ver.arch || '-',
+          version: ver.version || status.version || '2.0',
+          platform: ver.platform || 'linux',
+          arch: ver.arch || 'x64',
           uptime_seconds: status.uptime_seconds || 0,
           agent_count: status.agent_count || 0,
           default_provider: status.default_provider || '-',
           default_model: status.default_model || '-'
         };
-      } catch(e) { throw e; }
+      } catch(e) {
+        this.sysInfo = { version: '2.0', platform: 'linux', arch: 'x64', uptime_seconds: 0, agent_count: 0, default_provider: '-', default_model: '-' };
+      }
     },
 
     async loadUsage() {
@@ -242,14 +247,14 @@ function settingsPage() {
       var id = this.customModelId.trim();
       if (!id) return;
       this.customModelStatus = 'Adding...';
+      // openclaw gateway does not support custom model registration;
+      // save to config instead so it shows up in model list
       try {
-        await OpenFangAPI.post('/api/models/custom', {
-          id: id,
-          provider: this.customModelProvider || 'openrouter',
-          context_window: this.customModelContext || 128000,
-          max_output_tokens: this.customModelMaxOutput || 8192,
-        });
-        this.customModelStatus = 'Added!';
+        var provider = this.customModelProvider || 'openrouter';
+        var patch = { models: { providers: {} } };
+        patch.models.providers[provider] = { customModels: [{ id: id }] };
+        await OpenFangAPI.post('/api/config/set', { patch: patch });
+        this.customModelStatus = 'Added (restart gateway to take effect)';
         this.customModelId = '';
         this.showCustomModelForm = false;
         await this.loadModels();
@@ -281,7 +286,11 @@ function settingsPage() {
       var key = section + '.' + field;
       this.configSaving[key] = true;
       try {
-        await OpenFangAPI.post('/api/config/set', { path: key, value: value });
+        // Build nested patch: { section: { field: value } }
+        var patch = {};
+        patch[section] = {};
+        patch[section][field] = value;
+        await OpenFangAPI.post('/api/config/set', { patch: patch });
         this.configDirty[key] = false;
         OpenFangToast.success('Saved ' + key);
       } catch(e) {
@@ -476,10 +485,10 @@ function settingsPage() {
       this.providerUrlSaving[provider.id] = true;
       try {
         var result = await OpenFangAPI.put('/api/providers/' + encodeURIComponent(provider.id) + '/url', { base_url: url });
-        if (result.reachable) {
-          OpenFangToast.success(provider.display_name + ' URL saved &mdash; reachable (' + (result.latency_ms || '?') + 'ms)');
+        if (result && result.reachable) {
+          OpenFangToast.success(provider.display_name + ' URL saved — reachable (' + (result.latency_ms || '?') + 'ms)');
         } else {
-          OpenFangToast.warning(provider.display_name + ' URL saved but not reachable');
+          OpenFangToast.warn(provider.display_name + ' URL saved but not reachable');
         }
         await this.loadProviders();
       } catch(e) {
@@ -569,12 +578,13 @@ function settingsPage() {
       this.peersLoadError = '';
       try {
         var data = await OpenFangAPI.get('/api/peers');
+        // Normalize both openclaw (id/name/status) and openfang (node_id/node_name/state) shapes
         this.peers = (data.peers || []).map(function(p) {
           return {
-            node_id: p.node_id,
-            node_name: p.node_name,
-            address: p.address,
-            state: p.state,
+            node_id: p.node_id || p.id || '',
+            node_name: p.node_name || p.name || p.node_id || p.id || '',
+            address: p.address || '',
+            state: p.state || p.status || 'unknown',
             agent_count: (p.agents || []).length,
             protocol_version: p.protocol_version || 1
           };
@@ -595,10 +605,10 @@ function settingsPage() {
           var data = await OpenFangAPI.get('/api/peers');
           self.peers = (data.peers || []).map(function(p) {
             return {
-              node_id: p.node_id,
-              node_name: p.node_name,
-              address: p.address,
-              state: p.state,
+              node_id: p.node_id || p.id || '',
+              node_name: p.node_name || p.name || p.node_id || p.id || '',
+              address: p.address || '',
+              state: p.state || p.status || 'unknown',
               agent_count: (p.agents || []).length,
               protocol_version: p.protocol_version || 1
             };

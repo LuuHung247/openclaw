@@ -225,19 +225,16 @@ function channelsPage() {
           fields: this.formValues
         });
         this.setupStep = 2;
+        OpenFangToast.success(this.setupModal.display_name + ' saved.');
         // Auto-test after save
         try {
           var testResult = await OpenFangAPI.post('/api/channels/' + name + '/test', {});
-          if (testResult.status === 'ok') {
+          if (testResult && (testResult.status === 'ok' || testResult.ok)) {
             this.testPassed = true;
             this.setupStep = 3;
             OpenFangToast.success(this.setupModal.display_name + ' activated!');
-          } else {
-            OpenFangToast.success(this.setupModal.display_name + ' saved. ' + (testResult.message || ''));
           }
-        } catch(te) {
-          OpenFangToast.success(this.setupModal.display_name + ' saved. Test to verify connection.');
-        }
+        } catch(te) { /* test is best-effort */ }
         await this.refreshStatus();
       } catch(e) {
         OpenFangToast.error('Failed: ' + (e.message || 'Unknown error'));
@@ -268,12 +265,12 @@ function channelsPage() {
       this.testing[name] = true;
       try {
         var result = await OpenFangAPI.post('/api/channels/' + name + '/test', {});
-        if (result.status === 'ok') {
+        if (result && (result.status === 'ok' || result.ok)) {
           this.testPassed = true;
           this.setupStep = 3;
-          OpenFangToast.success(result.message);
+          OpenFangToast.success(result.message || (this.setupModal.display_name + ' connection OK'));
         } else {
-          OpenFangToast.error(result.message);
+          OpenFangToast.error((result && result.message) || 'Test failed');
         }
       } catch(e) {
         OpenFangToast.error('Test failed: ' + (e.message || 'Unknown error'));

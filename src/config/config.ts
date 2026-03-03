@@ -34,13 +34,13 @@ export type LoggingConfig = {
   level?: "silent" | "fatal" | "error" | "warn" | "info" | "debug" | "trace";
   file?: string;
   consoleLevel?:
-    | "silent"
-    | "fatal"
-    | "error"
-    | "warn"
-    | "info"
-    | "debug"
-    | "trace";
+  | "silent"
+  | "fatal"
+  | "error"
+  | "warn"
+  | "info"
+  | "debug"
+  | "trace";
   consoleStyle?: "pretty" | "compact" | "json";
 };
 
@@ -117,8 +117,8 @@ export type HookMappingConfig = {
   textTemplate?: string;
   deliver?: boolean;
   channel?:
-    | "last"
-    | "telegram";
+  | "last"
+  | "telegram";
   to?: string;
   thinking?: string;
   timeoutSeconds?: number;
@@ -376,7 +376,7 @@ export type GatewayControlUiConfig = {
   enabled?: boolean;
 };
 
-export type GatewayAuthMode = "token" | "password";
+export type GatewayAuthMode = "token" | "password" | "none";
 
 export type GatewayAuthConfig = {
   /** Authentication mode for Gateway connections. Defaults to token when set. */
@@ -484,12 +484,12 @@ export type ModelDefinitionConfig = {
 };
 
 export type ModelProviderConfig = {
-  baseUrl: string;
-  apiKey: string;
+  baseUrl?: string;
+  apiKey?: string;
   api?: ModelApi;
   headers?: Record<string, string>;
   authHeader?: boolean;
-  models: ModelDefinitionConfig[];
+  models?: ModelDefinitionConfig[];
 };
 
 export type ModelsConfig = {
@@ -553,9 +553,9 @@ export type ClawdisConfig = {
       model?: string;
       /** Delivery target (last|telegram|none). */
       target?:
-        | "last"
-        | "telegram"
-        | "none";
+      | "last"
+      | "telegram"
+      | "none";
       /** Optional delivery override (E.164 for WhatsApp, chat id for Telegram). */
       to?: string;
       /** Override the heartbeat prompt body (default: "HEARTBEAT"). */
@@ -644,12 +644,12 @@ const ModelDefinitionSchema = z.object({
 });
 
 const ModelProviderSchema = z.object({
-  baseUrl: z.string().min(1),
-  apiKey: z.string().min(1),
+  baseUrl: z.string().min(1).optional(),
+  apiKey: z.string().min(1).optional(),
   api: ModelApiSchema.optional(),
   headers: z.record(z.string(), z.string()).optional(),
   authHeader: z.boolean().optional(),
-  models: z.array(ModelDefinitionSchema),
+  models: z.array(ModelDefinitionSchema).optional(),
 });
 
 const ModelsConfigSchema = z
@@ -1169,7 +1169,7 @@ const ClawdisSchema = z.object({
         .optional(),
       auth: z
         .object({
-          mode: z.union([z.literal("token"), z.literal("password")]).optional(),
+          mode: z.union([z.literal("token"), z.literal("password"), z.literal("none")]).optional(),
           token: z.string().optional(),
           password: z.string().optional(),
           allowTailscale: z.boolean().optional(),
@@ -1319,11 +1319,11 @@ const LEGACY_CONFIG_MIGRATIONS: LegacyConfigMigration[] = [
       if (!routing || typeof routing !== "object") return;
       const groupChat =
         (routing as Record<string, unknown>).groupChat &&
-        typeof (routing as Record<string, unknown>).groupChat === "object"
+          typeof (routing as Record<string, unknown>).groupChat === "object"
           ? ((routing as Record<string, unknown>).groupChat as Record<
-              string,
-              unknown
-            >)
+            string,
+            unknown
+          >)
           : null;
       if (!groupChat) return;
       const requireMention = groupChat.requireMention;
@@ -1384,11 +1384,11 @@ const LEGACY_CONFIG_MIGRATIONS: LegacyConfigMigration[] = [
 
       const groups =
         (telegram as Record<string, unknown>).groups &&
-        typeof (telegram as Record<string, unknown>).groups === "object"
+          typeof (telegram as Record<string, unknown>).groups === "object"
           ? ((telegram as Record<string, unknown>).groups as Record<
-              string,
-              unknown
-            >)
+            string,
+            unknown
+          >)
           : {};
       const defaultKey = "*";
       const entry =

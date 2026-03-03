@@ -304,6 +304,9 @@ export const SessionsPatchParamsSchema = Type.Object(
         Type.Null(),
       ]),
     ),
+    modelOverride: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
+    providerOverride: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
+    displayName: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
   },
   { additionalProperties: false },
 );
@@ -623,7 +626,7 @@ export const ChatSendParamsSchema = Type.Object(
 export const ChatAbortParamsSchema = Type.Object(
   {
     sessionKey: NonEmptyString,
-    runId: NonEmptyString,
+    runId: Type.Optional(NonEmptyString),
   },
   { additionalProperties: false },
 );

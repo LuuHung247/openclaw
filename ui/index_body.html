@@ -48,7 +48,7 @@
         </div>
         <template x-if="!collapsed">
           <div x-transition>
-            <a class="nav-item" :class="{ active: page === 'agents' }" @click="navigate('agents')" :aria-current="page === 'agents' ? 'page' : false">
+            <a class="nav-item" :class="{ active: page === 'chat' }" @click="navigate('chat')" :aria-current="page === 'chat' ? 'page' : false">
               <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
               <span class="nav-label">Chat</span>
             </a>
@@ -407,9 +407,9 @@
           <div class="card mt-4" style="background:var(--bg-elevated)">
             <div class="card-header" style="margin-bottom:8px">Quick Actions</div>
             <div style="display:flex;flex-wrap:wrap;gap:8px">
-              <button class="btn btn-ghost btn-sm" @click="location.hash='agents'" style="display:flex;align-items:center;gap:4px">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
-                New Agent
+              <button class="btn btn-ghost btn-sm" @click="location.hash='chat'" style="display:flex;align-items:center;gap:4px">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                Chat
               </button>
               <button class="btn btn-ghost btn-sm" @click="location.hash='skills'" style="display:flex;align-items:center;gap:4px">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg>
@@ -466,19 +466,19 @@
               </div>
               <h3 style="color:var(--text-secondary);margin-bottom:4px">No Recent Activity</h3>
               <p class="text-xs text-dim">Activity will appear here once agents start processing.</p>
-              <button class="btn btn-primary btn-sm" @click="location.hash='agents'" style="margin-top:12px">Chat with an Agent</button>
+              <button class="btn btn-primary btn-sm" @click="location.hash='chat'" style="margin-top:12px">Chat with Agent</button>
             </div>
           </div>
 
           <!-- Quick Actions -->
           <div class="animate-entry stagger-6" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));gap:12px;margin-top:20px">
-            <div class="quick-action-card" @click="location.hash='agents'">
+            <div class="quick-action-card" @click="location.hash='chat'">
               <div class="quick-action-icon" style="background:var(--accent-subtle)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
               </div>
               <div>
-                <div class="quick-action-label">Create Agent</div>
-                <div class="quick-action-desc">Spawn a new agent</div>
+                <div class="quick-action-label">Chat</div>
+                <div class="quick-action-desc">Start chatting with agent</div>
               </div>
             </div>
             <div class="quick-action-card" @click="location.hash='settings'">
@@ -563,7 +563,6 @@
                 <button class="btn btn-ghost btn-sm" @click="$store.app.toggleFocusMode()" title="Ctrl+Shift+F">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g x-show="!$store.app.focusMode"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></g><g x-show="$store.app.focusMode"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></g></svg>
                 </button>
-                <button class="btn btn-danger btn-sm" @click="killAgent()">Stop</button>
               </div>
             </div>
 
@@ -714,7 +713,7 @@
                   <span class="recording-dot"></span>
                   <span class="text-xs" style="color:var(--danger)" x-text="formatRecordingTime()"></span>
                 </div>
-                <textarea id="msg-input" rows="1" :placeholder="recording ? 'Recording... release to send' : 'Message OpenFang... (/ for commands)'"
+                <textarea id="msg-input" rows="1" :placeholder="recording ? 'Recording... release to send' : 'Message OpenClaw... (/ for commands)'"
                           @keydown.enter.prevent="if(!$event.shiftKey){if(showModelPicker && filteredModelPicker.length){pickModel(filteredModelPicker[modelPickerIdx].id)}else if(showSlashMenu && filteredSlashCommands.length){executeSlashCommand(filteredSlashCommands[slashIdx].cmd)}else{sendMessage()}}"
                           @keydown.escape="showSlashMenu = false; showModelPicker = false"
                           @keydown.arrow-up.prevent="if(showModelPicker){modelPickerIdx = Math.max(0, modelPickerIdx - 1)}else if(showSlashMenu){slashIdx = Math.max(0, slashIdx - 1)}"
@@ -752,11 +751,7 @@
         <!-- MODE 2: Agent picker + Templates (no agent chatting) -->
         <div x-show="!activeChatAgent" class="chat-wrapper">
         <div class="page-header">
-          <h2>Chat</h2>
-          <div class="flex gap-2">
-            <button class="btn btn-ghost btn-sm" x-show="agents.length" @click="openSpawnWizard()">+ New Agent</button>
-            <button class="btn btn-danger btn-sm" x-show="agents.length > 1" @click="killAllAgents()">Stop All</button>
-          </div>
+          <h2>Sessions</h2>
         </div>
         <div class="page-body" style="overflow-y:auto;padding:24px">
 
@@ -780,23 +775,6 @@
             </div>
           </div>
 
-          <!-- Quick-start templates — spawn + chat in one click -->
-          <div>
-            <div class="text-sm font-bold mb-2" style="color:var(--text-dim);letter-spacing:0.5px;font-size:11px;text-transform:uppercase" x-text="agents.length ? 'Or Start a New Agent' : 'Start Chatting'"></div>
-            <div class="card-grid">
-              <template x-for="t in builtinTemplates" :key="t.name">
-                <div class="card" style="cursor:pointer" @click="spawnBuiltin(t)">
-                  <div class="flex justify-between items-center mb-1">
-                    <div class="card-header" style="margin:0;font-size:14px;font-weight:600" x-text="t.name"></div>
-                    <span class="badge badge-dim" x-text="t.category"></span>
-                  </div>
-                  <div class="text-sm" style="line-height:1.5;color:var(--text-dim)" x-text="t.description"></div>
-                </div>
-              </template>
-            </div>
-          </div>
-
-          <!-- Custom spawn modal still available -->
           </div>
 
           <!-- Agent detail modal with tabs (Info / Files / Config) -->
@@ -851,7 +829,6 @@
                     <button class="btn btn-primary" @click="chatWithAgent(detailAgent); showDetailModal = false">Chat</button>
                     <button class="btn btn-ghost" @click="cloneAgent(detailAgent)">Clone</button>
                     <button class="btn btn-ghost" @click="clearHistory(detailAgent)">Clear History</button>
-                    <button class="btn btn-danger" @click="killAgent(detailAgent)">Stop</button>
                   </div>
                 </div>
 
@@ -944,176 +921,214 @@
             </div>
           </template>
 
-          <!-- Multi-step Spawn Wizard -->
-          <template x-if="showSpawnModal">
-            <div class="modal-overlay" @click.self="showSpawnModal = false" @keydown.escape.window="showSpawnModal = false">
-              <div class="modal" style="max-width:560px">
-                <div class="modal-header">
-                  <h3>Create Agent</h3>
-                  <button class="modal-close" @click="showSpawnModal = false">&times;</button>
+        </div><!-- /activeChatAgent picker wrapper -->
+      </div>
+    </template>
+
+    <!-- Page: Chat (standalone — auto-connects to first session) -->
+    <template x-if="page === 'chat'">
+      <div x-data="chatPage" class="chat-wrapper">
+        <!-- Chat header -->
+        <div class="page-header" x-show="currentAgent">
+          <div class="flex items-center gap-2" style="min-width:0">
+            <span x-show="currentAgent && currentAgent.identity && currentAgent.identity.emoji" x-text="currentAgent && currentAgent.identity && currentAgent.identity.emoji" style="font-size:20px;line-height:1"></span>
+            <div style="min-width:0">
+              <div class="font-bold" x-text="currentAgent ? currentAgent.name : ''"></div>
+              <div class="text-xs text-dim truncate" style="font-family:var(--font-mono);font-size:11px" x-text="currentAgent ? currentAgent.model_provider + ':' + currentAgent.model_name : ''"></div>
+            </div>
+          </div>
+          <div class="flex gap-2 items-center">
+            <span class="badge badge-running" x-show="currentAgent && !sending" style="animation:fadeIn 0.2s">
+              <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--success);margin-right:2px"></span> Ready
+            </span>
+            <span class="badge badge-suspended" x-show="sending" style="animation:fadeIn 0.2s">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" style="animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+              Generating...
+            </span>
+            <span class="queue-badge" x-show="messageQueue.length > 0" x-text="'+' + messageQueue.length + ' queued'"></span>
+            <!-- Session switcher -->
+            <div style="position:relative">
+              <button class="btn btn-ghost btn-sm" @click="sessionsOpen = !sessionsOpen" title="Sessions" style="position:relative">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+                <span class="session-count-badge" x-show="sessions.length > 1" x-text="sessions.length"></span>
+              </button>
+              <div class="session-dropdown" x-show="sessionsOpen" @click.outside="sessionsOpen = false" x-transition>
+                <div class="session-dropdown-header">
+                  <span class="text-xs font-bold">Sessions</span>
+                  <button class="btn btn-ghost btn-sm" @click="createSession()" style="padding:2px 6px;font-size:11px">+ New</button>
                 </div>
-
-                <!-- Wizard / TOML toggle -->
-                <div class="tabs" style="margin-bottom:12px">
-                  <div class="tab" :class="{ active: spawnMode === 'wizard' }" @click="spawnMode = 'wizard'">Wizard</div>
-                  <div class="tab" :class="{ active: spawnMode === 'toml' }" @click="spawnMode = 'toml'">Raw TOML</div>
-                </div>
-
-                <!-- Raw TOML mode (unchanged) -->
-                <div x-show="spawnMode === 'toml'">
-                  <div class="form-group">
-                    <label>Agent Manifest (TOML)</label>
-                    <textarea class="form-textarea" style="height:200px;font-size:11px" x-model="spawnToml" placeholder='name = "my-agent"&#10;module = "builtin:chat"&#10;[model]&#10;provider = "groq"&#10;model = "llama-3.3-70b-versatile"&#10;system_prompt = "You are helpful."'></textarea>
-                  </div>
-                  <button class="btn btn-primary btn-block mt-4" @click="spawnAgent()" :disabled="spawning">
-                    <span x-show="!spawning">Spawn Agent</span><span x-show="spawning">Spawning...</span>
-                  </button>
-                </div>
-
-                <!-- Wizard steps -->
-                <div x-show="spawnMode === 'wizard'">
-                  <!-- Step indicator -->
-                  <div class="wizard-steps">
-                    <template x-for="s in [1,2,3,4,5]" :key="s">
-                      <div class="wizard-dot" :class="{ active: spawnStep === s, done: spawnStep > s }">
-                        <span x-text="spawnStep > s ? '\u2713' : s"></span>
-                      </div>
-                    </template>
-                  </div>
-
-                  <!-- Step 1: Name + Identity -->
-                  <div x-show="spawnStep === 1">
-                    <div class="form-group">
-                      <label>Agent Name</label>
-                      <input class="form-input" x-model="spawnForm.name" placeholder="my-agent" @keydown.enter="nextStep()">
-                    </div>
-                    <div class="form-group">
-                      <label>Emoji</label>
-                      <div class="emoji-grid">
-                        <template x-for="em in emojiOptions" :key="em">
-                          <button class="emoji-grid-item" :class="{ active: spawnIdentity.emoji === em }" @click="spawnIdentity.emoji = em" x-text="em"></button>
-                        </template>
-                      </div>
-                    </div>
-                    <div class="form-group">
-                      <label>Color</label>
-                      <input type="color" x-model="spawnIdentity.color" style="width:48px;height:32px;border:none;cursor:pointer;background:none">
-                    </div>
-                    <div class="form-group">
-                      <label>Archetype</label>
-                      <select class="form-select" x-model="spawnIdentity.archetype">
-                        <option value="">Choose...</option>
-                        <template x-for="a in archetypeOptions" :key="a"><option :value="a.toLowerCase()" x-text="a"></option></template>
-                      </select>
+                <template x-for="s in sessions" :key="s.session_id">
+                  <div class="session-item" :class="{ active: s.active }" @click="if (!s.active) { switchSession(s.session_id); sessionsOpen = false; }">
+                    <span class="session-dot" :class="s.active ? 'active' : ''"></span>
+                    <div style="flex:1;min-width:0">
+                      <div class="text-xs font-bold truncate" x-text="s.label || 'Session ' + s.session_id.substring(0, 8)"></div>
+                      <div class="text-xs text-dim" x-text="s.message_count + ' messages'"></div>
                     </div>
                   </div>
-
-                  <!-- Step 2: Model Selection -->
-                  <div x-show="spawnStep === 2">
-                    <div class="form-group">
-                      <label>Provider</label>
-                      <select class="form-select" x-model="spawnForm.provider">
-                        <option value="anthropic">Anthropic</option><option value="openai">OpenAI</option>
-                        <option value="groq">Groq</option><option value="ollama">Ollama</option>
-                        <option value="google">Google</option><option value="mistral">Mistral</option>
-                        <option value="xai">xAI</option><option value="deepseek">DeepSeek</option>
-                        <option value="cerebras">Cerebras</option><option value="sambanova">SambaNova</option>
-                        <option value="together">Together</option>
-                      </select>
-                    </div>
-                    <div class="form-group">
-                      <label>Model</label>
-                      <input class="form-input" x-model="spawnForm.model" placeholder="e.g. llama-3.3-70b-versatile">
-                    </div>
-                    <div class="form-group">
-                      <label>System Prompt</label>
-                      <textarea class="form-textarea" x-model="spawnForm.systemPrompt" placeholder="You are a helpful assistant."></textarea>
-                    </div>
-                  </div>
-
-                  <!-- Step 3: Personality Presets -->
-                  <div x-show="spawnStep === 3">
-                    <label class="mb-2" style="display:block;font-size:13px;font-weight:600">Personality</label>
-                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">
-                      <template x-for="preset in personalityPresets" :key="preset.id">
-                        <button class="personality-pill" :class="{ active: selectedPreset === preset.id }" @click="selectPreset(preset)" x-text="preset.label"></button>
-                      </template>
-                    </div>
-                    <div class="form-group">
-                      <label>Soul / Persona <span class="text-xs text-dim">(editable)</span></label>
-                      <textarea class="form-textarea" x-model="soulContent" style="height:100px" placeholder="Describe this agent's personality and communication style..."></textarea>
-                    </div>
-                  </div>
-
-                  <!-- Step 4: Tools & Capabilities -->
-                  <div x-show="spawnStep === 4">
-                    <div class="form-group">
-                      <label>Tool Profile</label>
-                      <select class="form-select" x-model="spawnForm.profile" @focus="loadSpawnProfiles()">
-                        <option value="minimal">Minimal &mdash; Read-only file access</option>
-                        <option value="coding">Coding &mdash; Files + shell + web fetch</option>
-                        <option value="research">Research &mdash; Web search + file read/write</option>
-                        <option value="messaging">Messaging &mdash; Agents + memory access</option>
-                        <option value="automation">Automation &mdash; All tools except custom</option>
-                        <option value="full" selected>Full &mdash; All 35+ tools</option>
-                        <option value="custom">Custom (manual capabilities)</option>
-                      </select>
-                      <div class="capability-preview" x-show="selectedProfileTools.length > 0" style="margin-top:8px">
-                        <div class="capability-preview-title">Tools included</div>
-                        <div style="display:flex;flex-wrap:wrap;gap:2px">
-                          <template x-for="tool in selectedProfileTools" :key="tool"><span class="tool-badge" x-text="tool"></span></template>
-                          <span class="tool-badge" x-show="selectedProfileTools.length >= 15" style="opacity:0.6">...</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="form-group" x-show="spawnForm.profile === 'custom'">
-                      <label>Capabilities</label>
-                      <div class="flex gap-3" style="flex-wrap:wrap">
-                        <label class="form-checkbox"><input type="checkbox" x-model="spawnForm.caps.memory_read"> Memory Read</label>
-                        <label class="form-checkbox"><input type="checkbox" x-model="spawnForm.caps.memory_write"> Memory Write</label>
-                        <label class="form-checkbox"><input type="checkbox" x-model="spawnForm.caps.network"> Network</label>
-                        <label class="form-checkbox"><input type="checkbox" x-model="spawnForm.caps.shell"> Shell</label>
-                        <label class="form-checkbox"><input type="checkbox" x-model="spawnForm.caps.agent_spawn"> Agent Spawn</label>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Step 5: Review & Spawn -->
-                  <div x-show="spawnStep === 5">
-                    <div class="card" style="margin-bottom:16px">
-                      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-                        <div style="width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px" :style="'background:' + spawnIdentity.color + '22; border:2px solid ' + spawnIdentity.color">
-                          <span x-text="spawnIdentity.emoji || '\u{1F916}'"></span>
-                        </div>
-                        <div>
-                          <div class="font-bold" style="font-size:15px" x-text="spawnForm.name || 'Unnamed'"></div>
-                          <div class="text-xs text-dim" x-text="spawnIdentity.archetype || 'agent'"></div>
-                        </div>
-                      </div>
-                      <div class="detail-grid" style="gap:6px">
-                        <div class="detail-row"><span class="detail-label">Provider</span><span class="detail-value" x-text="spawnForm.provider"></span></div>
-                        <div class="detail-row"><span class="detail-label">Model</span><span class="detail-value" x-text="spawnForm.model"></span></div>
-                        <div class="detail-row"><span class="detail-label">Profile</span><span class="detail-value" x-text="spawnForm.profile"></span></div>
-                        <div class="detail-row" x-show="selectedPreset"><span class="detail-label">Personality</span><span class="detail-value" style="text-transform:capitalize" x-text="selectedPreset"></span></div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Navigation buttons -->
-                  <div class="flex justify-between mt-4">
-                    <button class="btn btn-ghost" x-show="spawnStep > 1" @click="prevStep()">Back</button>
-                    <div x-show="spawnStep <= 1"></div>
-                    <button class="btn btn-primary" x-show="spawnStep < 5" @click="nextStep()">Next</button>
-                    <button class="btn btn-primary" x-show="spawnStep === 5" @click="spawnAgent()" :disabled="spawning">
-                      <span x-show="!spawning">Spawn Agent</span><span x-show="spawning">Spawning...</span>
-                    </button>
-                  </div>
-                </div>
+                </template>
+                <div class="text-xs text-dim" style="padding:8px 12px;text-align:center" x-show="!sessions.length">No sessions</div>
               </div>
             </div>
+            <button class="btn btn-ghost btn-sm" @click="toggleSearch()" title="Search messages (Ctrl+F)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            </button>
+            <button class="btn btn-ghost btn-sm" @click="$store.app.toggleFocusMode()" title="Ctrl+Shift+F">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g x-show="!$store.app.focusMode"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></g><g x-show="$store.app.focusMode"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></g></svg>
+            </button>
+          </div>
+        </div>
+        <!-- Loading state -->
+        <div x-show="!currentAgent" style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-dim)">
+          <div style="text-align:center">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 12px;display:block;opacity:0.4"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <p class="text-sm">Connecting to agent...</p>
+          </div>
+        </div>
+        <!-- Search bar -->
+        <div class="chat-search-bar" x-show="searchOpen" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 transform -translate-y-2" x-transition:enter-end="opacity-100 transform translate-y-0">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" id="chat-search-input" x-model="searchQuery" x-ref="searchInput" placeholder="Search messages..." class="chat-search-input" @keydown.escape="toggleSearch()">
+          <span class="text-xs text-dim" x-show="searchQuery.trim()" x-text="filteredMessages.length + ' of ' + messages.length"></span>
+          <button class="btn btn-ghost btn-sm" @click="toggleSearch()" style="padding:2px 6px">&times;</button>
+        </div>
+        <!-- Messages area -->
+        <div class="messages" id="messages" @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="handleDrop($event); dragOver = false">
+          <template x-if="currentAgent">
+            <div>
+              <template x-for="(msg, $index) in filteredMessages" :key="msg.id">
+                <div class="message" :class="msg.role + (msg.thinking ? ' thinking' : '') + (msg.streaming ? ' streaming' : '') + (isGrouped($index) ? ' grouped' : '')">
+                  <div class="message-avatar" x-show="msg.role === 'agent'">
+                    <img src="/ui/logo.png" alt="OpenClaw">
+                  </div>
+                  <div class="message-body">
+                    <div class="message-actions" x-show="msg.text && msg.text.trim() && !msg.thinking && !msg.streaming">
+                      <button class="message-action-btn" :class="{ copied: msg._copied }" @click="copyMessage(msg)" :title="msg._copied ? 'Copied!' : 'Copy message'">
+                        <svg x-show="!msg._copied" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                        <svg x-show="msg._copied" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                      </button>
+                    </div>
+                    <div class="message-bubble" x-show="msg.thinking" style="background:transparent;border:none;padding:4px 0">
+                      <div class="typing-dots"><span></span><span></span><span></span></div>
+                    </div>
+                    <div class="message-bubble" :class="{ 'markdown-body': (msg.role === 'agent' || msg.role === 'system') && !msg.thinking && !msg.isHtml }" x-show="msg.text && msg.text.trim() && !msg.thinking" x-html="highlightSearch(msg.isHtml ? msg.text : ((msg.role === 'agent' || msg.role === 'system') && !msg.thinking ? renderMarkdown(msg.text) : escapeHtml(msg.text)))"></div>
+                    <template x-if="msg.images && msg.images.length">
+                      <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0">
+                        <template x-for="img in msg.images" :key="img.file_id">
+                          <a :href="'/api/uploads/' + img.file_id" target="_blank" style="display:block">
+                            <img :src="'/api/uploads/' + img.file_id" :alt="img.filename || 'uploaded image'" style="max-width:320px;max-height:320px;border-radius:8px;border:1px solid var(--border);cursor:pointer" loading="lazy">
+                          </a>
+                        </template>
+                      </div>
+                    </template>
+                    <template x-for="tool in (msg.tools || [])" :key="tool.id">
+                      <div class="tool-card" :class="{ 'tool-card-error': tool.is_error }" :data-tool="tool.name">
+                        <div class="tool-card-header" @click="tool.expanded = !tool.expanded">
+                          <template x-if="tool.running"><div class="tool-card-spinner"></div></template>
+                          <template x-if="!tool.running && !tool.is_error"><span class="tool-icon-ok">&#10003;</span></template>
+                          <template x-if="!tool.running && tool.is_error"><span class="tool-icon-err">&#10007;</span></template>
+                          <span class="tool-card-icon" x-html="toolIcon(tool.name)"></span>
+                          <span class="tool-card-name" x-text="tool.name"></span>
+                          <span class="text-xs text-dim" x-text="tool.running ? 'running...' : (tool.is_error ? 'error' : (tool.result ? (tool.result.length > 500 ? Math.round(tool.result.length/1024) + 'KB' : 'done') : 'done'))" style="margin-left:auto"></span>
+                          <span class="tool-expand-chevron" :style="tool.expanded ? 'transform:rotate(90deg)' : ''" style="transition:transform 0.15s">&#9654;</span>
+                        </div>
+                        <div class="tool-card-body" x-show="tool.expanded" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100">
+                          <div x-show="tool.input" style="margin-bottom:6px">
+                            <div class="tool-section-label">Input</div>
+                            <pre class="tool-pre" x-text="formatToolJson(tool.input)"></pre>
+                          </div>
+                          <div x-show="tool.result">
+                            <div class="tool-section-label">Result <span class="text-xs text-muted" x-show="tool.result && tool.result.length > 200" x-text="'(' + tool.result.length + ' chars)'"></span></div>
+                            <pre class="tool-pre" :class="{ 'tool-pre-error': tool.is_error, 'tool-pre-short': !tool.is_error && tool.result && tool.result.length < 100, 'tool-pre-medium': !tool.is_error && tool.result && tool.result.length >= 100 && tool.result.length < 500 }" x-text="formatToolJson(tool.result)"></pre>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                      <div class="message-time" x-text="formatTime(msg.ts)" x-show="msg.ts && !msg.thinking"></div>
+                      <div class="message-meta" x-text="msg.meta" x-show="msg.meta"></div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
           </template>
-
-        </div><!-- /activeChatAgent picker wrapper -->
+          <div x-show="dragOver" style="position:absolute;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:var(--surface);opacity:0.92;border:2px dashed var(--accent);border-radius:8px;pointer-events:none">
+            <span style="font-size:16px;color:var(--accent);font-weight:600">Drop files here</span>
+          </div>
+        </div>
+        <!-- Input area -->
+        <div class="input-area" x-show="currentAgent" style="position:relative">
+          <div x-show="attachments.length > 0" style="display:flex;gap:8px;flex-wrap:wrap;padding:0 0 8px 0">
+            <template x-for="(att, aidx) in attachments" :key="aidx">
+              <div style="position:relative;border:1px solid var(--border);border-radius:6px;padding:4px;display:flex;align-items:center;gap:6px;background:var(--surface2);max-width:180px">
+                <img x-show="att.preview" :src="att.preview" style="width:32px;height:32px;object-fit:cover;border-radius:4px">
+                <span x-show="!att.preview" style="font-size:18px;width:32px;text-align:center">&#128196;</span>
+                <span class="text-xs truncate" style="max-width:100px" x-text="att.file.name"></span>
+                <span x-show="att.uploading" class="spinner" style="width:12px;height:12px;border-width:2px"></span>
+                <button @click="removeAttachment(aidx)" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:var(--danger);color:#fff;border:none;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;line-height:1">&times;</button>
+              </div>
+            </template>
+          </div>
+          <div x-show="showSlashMenu && filteredSlashCommands.length" class="slash-menu">
+            <template x-for="(cmd, idx) in filteredSlashCommands" :key="cmd.cmd">
+              <div class="slash-menu-item" :class="{ 'slash-active': idx === slashIdx }" @click="executeSlashCommand(cmd.cmd)" @mouseenter="slashIdx = idx">
+                <span class="font-bold" style="font-size:13px" x-text="cmd.cmd"></span>
+                <span class="text-xs text-dim" x-text="cmd.desc"></span>
+              </div>
+            </template>
+          </div>
+          <div x-show="showModelPicker && filteredModelPicker.length" class="slash-menu" style="max-height:280px;overflow-y:auto">
+            <div class="text-xs text-dim" style="padding:4px 10px;border-bottom:1px solid var(--border)">Available models — pick one or keep typing</div>
+            <template x-for="(m, idx) in filteredModelPicker" :key="m.id">
+              <div class="slash-menu-item" :class="{ 'slash-active': idx === modelPickerIdx }" @click="pickModel(m.id)" @mouseenter="modelPickerIdx = idx">
+                <span class="font-bold" style="font-size:12px;font-family:var(--font-mono)" x-text="m.id"></span>
+                <span class="text-xs text-dim" x-text="m.provider + (m.display_name && m.display_name !== m.id ? ' · ' + m.display_name : '')"></span>
+              </div>
+            </template>
+          </div>
+          <div class="input-row">
+            <button class="btn btn-ghost btn-sm" @click="$refs.fileInput.click()" title="Attach file" style="padding:6px 8px;flex-shrink:0">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            </button>
+            <input type="file" x-ref="fileInput" multiple accept="image/*,.txt,.pdf,.md,.json,.csv,.mp3,.wav,.ogg,.webm,.m4a,.flac" @change="addFiles($event.target.files); $event.target.value = ''" style="display:none">
+            <button class="btn btn-ghost btn-sm" :class="{ 'btn-recording': recording }" @mousedown="startRecording()" @mouseup="stopRecording()" @mouseleave="if(recording) stopRecording()" title="Hold to record voice" style="padding:6px 8px;flex-shrink:0">
+              <svg x-show="!recording" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+              <span x-show="recording" class="recording-dot"></span>
+            </button>
+            <div class="recording-indicator" x-show="recording" x-transition>
+              <span class="recording-dot"></span>
+              <span class="text-xs" style="color:var(--danger)" x-text="formatRecordingTime()"></span>
+            </div>
+            <textarea id="msg-input" rows="1" :placeholder="recording ? 'Recording... release to send' : 'Message OpenClaw... (/ for commands)'"
+                      @keydown.enter.prevent="if(!$event.shiftKey){if(showModelPicker && filteredModelPicker.length){pickModel(filteredModelPicker[modelPickerIdx].id)}else if(showSlashMenu && filteredSlashCommands.length){executeSlashCommand(filteredSlashCommands[slashIdx].cmd)}else{sendMessage()}}"
+                      @keydown.escape="showSlashMenu = false; showModelPicker = false"
+                      @keydown.arrow-up.prevent="if(showModelPicker){modelPickerIdx = Math.max(0, modelPickerIdx - 1)}else if(showSlashMenu){slashIdx = Math.max(0, slashIdx - 1)}"
+                      @keydown.arrow-down.prevent="if(showModelPicker){modelPickerIdx = Math.min(filteredModelPicker.length - 1, modelPickerIdx + 1)}else if(showSlashMenu){slashIdx = Math.min(filteredSlashCommands.length - 1, slashIdx + 1)}"
+                      @input="$el.style.height='auto';$el.style.height=Math.min($el.scrollHeight,150)+'px'"
+                      x-model="inputText"
+                      :class="{ 'streaming-active': sending }"></textarea>
+            <template x-if="!sending">
+              <button class="btn-send" @click="sendMessage()" :disabled="!inputText.trim() && !attachments.length">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+              </button>
+            </template>
+            <template x-if="sending">
+              <button class="btn-stop" @click="stopAgent()" title="Stop generating">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              </button>
+            </template>
+          </div>
+          <div class="input-footer">
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-dim" x-text="tokenCount > 0 ? '~' + tokenCount + ' tokens' : (attachments.length ? attachments.length + ' file(s)' : '')"></span>
+              <span class="queue-badge" x-show="messageQueue.length > 0" x-text="messageQueue.length + ' queued'"></span>
+            </div>
+            <div class="tip-bar" x-show="currentTip && !sending">
+              <span class="text-xs" x-text="currentTip"></span>
+              <button class="tip-bar-dismiss" @click="dismissTips()" title="Dismiss">&times;</button>
+            </div>
+          </div>
+        </div>
       </div>
     </template>
 
@@ -2365,529 +2380,6 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
         </div>
       </div>
     </template>
-
-    <!-- Page: Hands -->
-    <template x-if="page === 'hands'">
-      <div x-data="handsPage">
-        <div class="page-header"><h2>Hands</h2></div>
-        <div class="page-body" x-init="loadData()">
-          <div class="info-card">
-            <h4>Hands &mdash; Curated Autonomous Capability Packages</h4>
-            <p>Hands are pre-configured AI agents that autonomously handle specific tasks. Each hand includes a tuned system prompt, required tools, and a dashboard for tracking work.</p>
-          </div>
-
-          <div x-show="loading" class="loading-state"><div class="spinner"></div><span>Loading hands...</span></div>
-          <div x-show="!loading && loadError" class="error-state">
-            <span class="error-icon">!</span>
-            <p x-text="loadError"></p>
-            <button class="btn btn-ghost btn-sm" @click="loadData()">Retry</button>
-          </div>
-
-          <div x-show="!loading && !loadError">
-            <!-- Tabs -->
-            <div class="tabs">
-              <div class="tab" :class="{ active: tab === 'available' }" @click="tab = 'available'">
-                Available <span class="badge badge-dim" x-show="hands.length" x-text="hands.length" style="margin-left:4px"></span>
-              </div>
-              <div class="tab" :class="{ active: tab === 'active' }" @click="tab = 'active'; loadActive()">
-                Active <span class="badge badge-success" x-show="instances.length" x-text="instances.length" style="margin-left:4px"></span>
-              </div>
-            </div>
-
-            <!-- TAB: Available Hands -->
-            <div x-show="tab === 'available'">
-              <div class="card-grid" x-show="hands.length">
-                <template x-for="hand in hands" :key="hand.id">
-                  <div class="card" :class="{ 'card-glow': hand.requirements_met }">
-                    <div class="flex justify-between items-center mb-2">
-                      <div class="flex items-center gap-2">
-                        <span style="font-size:1.4rem" x-text="hand.icon"></span>
-                        <div class="card-header" style="margin:0" x-text="hand.name"></div>
-                      </div>
-                      <span class="badge" :class="hand.requirements_met ? 'badge-success' : 'badge-dim'" x-text="hand.requirements_met ? 'Ready' : 'Setup needed'"></span>
-                    </div>
-                    <div class="card-meta" x-text="hand.description"></div>
-
-                    <!-- Requirements -->
-                    <div class="mt-3" x-show="hand.requirements && hand.requirements.length">
-                      <div class="text-xs text-dim mb-1" style="letter-spacing:0.5px">REQUIREMENTS</div>
-                      <template x-for="req in hand.requirements" :key="req.key">
-                        <div class="flex items-center gap-2 text-xs" style="padding:2px 0">
-                          <span :style="req.satisfied ? 'color:var(--success)' : 'color:var(--danger)'" x-text="req.satisfied ? '\u2713' : '\u2717'"></span>
-                          <span x-text="req.label"></span>
-                        </div>
-                      </template>
-                    </div>
-
-                    <!-- Tools -->
-                    <div class="mt-2">
-                      <span class="text-xs text-dim" x-text="hand.tools.length + ' tool(s)'"></span>
-                      <span class="text-xs text-dim" style="margin-left:8px" x-text="hand.dashboard_metrics + ' metric(s)'"></span>
-                      <span class="category-badge" style="margin-left:8px;font-size:0.65rem" x-text="hand.category"></span>
-                    </div>
-
-                    <!-- Actions -->
-                    <div class="flex justify-between items-center mt-3">
-                      <button class="btn btn-ghost btn-sm" @click="showDetail(hand.id)">Details</button>
-                      <button class="btn btn-primary btn-sm" @click="openSetupWizard(hand.id)" :disabled="setupLoading || activatingId === hand.id" x-text="setupLoading ? 'Loading...' : 'Activate'"></button>
-                    </div>
-                  </div>
-                </template>
-              </div>
-              <div class="empty-state" x-show="!hands.length">
-                <div class="empty-state-icon">
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v6"/><path d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-5.7-2.4L3.4 16a2 2 0 0 1 3.2-2.4L8 15"/></svg>
-                </div>
-                <h3>No hands available</h3>
-                <p>Hands are curated AI capability packages. They will appear once the kernel loads bundled hands.</p>
-              </div>
-            </div>
-
-            <!-- TAB: Active Instances -->
-            <div x-show="tab === 'active'">
-              <div x-show="activeLoading" class="loading-state"><div class="spinner"></div><span>Loading active hands...</span></div>
-              <div class="card-grid" x-show="instances.length && !activeLoading">
-                <template x-for="inst in instances" :key="inst.instance_id">
-                  <div class="card">
-                    <div class="flex justify-between items-center mb-2">
-                      <div class="flex items-center gap-2">
-                        <span style="font-size:1.4rem" x-text="getHandIcon(inst.hand_id)"></span>
-                        <div class="card-header" style="margin:0" x-text="inst.agent_name || inst.hand_id"></div>
-                      </div>
-                      <span class="badge" :class="{ 'badge-success': inst.status === 'Active', 'badge-dim': inst.status === 'Paused', 'badge-warn': inst.status && inst.status.startsWith('Error'), 'badge-info': inst.status === 'Inactive' }" x-text="inst.status"></span>
-                    </div>
-                    <div class="text-xs text-dim" x-text="'Activated: ' + new Date(inst.activated_at).toLocaleString()"></div>
-                    <div class="text-xs text-dim" x-show="inst.agent_id" x-text="'Agent: ' + inst.agent_id"></div>
-
-                    <!-- Stats (loaded on demand) -->
-                    <div class="mt-3" x-show="inst._stats">
-                      <template x-for="(val, label) in (inst._stats || {})" :key="label">
-                        <div class="flex justify-between text-xs" style="padding:2px 0">
-                          <span class="text-dim" x-text="label"></span>
-                          <span x-text="formatMetric(val)"></span>
-                        </div>
-                      </template>
-                    </div>
-
-                    <!-- Actions -->
-                    <div class="flex gap-2 mt-3">
-                      <button class="btn btn-ghost btn-sm" @click="loadStats(inst)">Stats</button>
-                      <template x-if="isBrowserHand(inst)">
-                        <button class="btn btn-ghost btn-sm" @click="openBrowserViewer(inst)">View Browser</button>
-                      </template>
-                      <template x-if="inst.status === 'Active'">
-                        <button class="btn btn-ghost btn-sm" @click="pauseHand(inst)">Pause</button>
-                      </template>
-                      <template x-if="inst.status === 'Paused'">
-                        <button class="btn btn-ghost btn-sm" @click="resumeHand(inst)">Resume</button>
-                      </template>
-                      <template x-if="inst.status && inst.status.startsWith('Error')">
-                        <span class="text-xs text-dim">Error — deactivate and reactivate</span>
-                      </template>
-                      <button class="btn btn-danger btn-sm" @click="deactivate(inst)">Deactivate</button>
-                    </div>
-                  </div>
-                </template>
-              </div>
-              <div class="empty-state" x-show="!instances.length && !activeLoading">
-                <h4>No active hands</h4>
-                <p class="hint">Activate a hand from the Available tab to get started. Each hand spawns a dedicated agent.</p>
-                <button class="btn btn-primary mt-4" @click="tab = 'available'">Browse Hands</button>
-              </div>
-            </div>
-
-            <!-- Detail Modal -->
-            <template x-if="detailHand">
-              <div class="modal-overlay" @click.self="detailHand = null" @keydown.escape.window="detailHand = null">
-                <div class="modal" style="max-width:600px">
-                  <div class="modal-header">
-                    <h3><span x-text="detailHand.icon"></span> <span x-text="detailHand.name"></span></h3>
-                    <button class="modal-close" @click="detailHand = null">&times;</button>
-                  </div>
-                  <div class="mb-3">
-                    <p x-text="detailHand.description"></p>
-                  </div>
-                  <div class="mb-3">
-                    <div class="text-xs text-dim mb-1" style="letter-spacing:0.5px">AGENT CONFIG</div>
-                    <div class="text-sm" x-show="detailHand.agent">
-                      <div class="flex justify-between" style="padding:2px 0"><span class="text-dim">Provider</span><span x-text="detailHand.agent.provider"></span></div>
-                      <div class="flex justify-between" style="padding:2px 0"><span class="text-dim">Model</span><span x-text="detailHand.agent.model"></span></div>
-                    </div>
-                  </div>
-                  <div class="mb-3">
-                    <div class="text-xs text-dim mb-1" style="letter-spacing:0.5px">REQUIREMENTS</div>
-                    <template x-for="req in (detailHand.requirements || [])" :key="req.key">
-                      <div class="flex items-center gap-2 text-sm" style="padding:3px 0">
-                        <span :style="req.satisfied ? 'color:var(--success)' : 'color:var(--danger)'" x-text="req.satisfied ? '\u2713' : '\u2717'"></span>
-                        <span x-text="req.label"></span>
-                        <code class="text-xs text-dim" x-text="req.check_value" style="margin-left:auto"></code>
-                      </div>
-                    </template>
-                  </div>
-                  <div class="mb-3">
-                    <div class="text-xs text-dim mb-1" style="letter-spacing:0.5px">TOOLS</div>
-                    <div class="flex flex-wrap gap-1">
-                      <template x-for="tool in (detailHand.tools || [])" :key="tool">
-                        <span class="category-badge" x-text="tool" style="font-size:0.7rem"></span>
-                      </template>
-                    </div>
-                  </div>
-                  <div class="mb-3" x-show="detailHand.dashboard && detailHand.dashboard.length">
-                    <div class="text-xs text-dim mb-1" style="letter-spacing:0.5px">DASHBOARD METRICS</div>
-                    <template x-for="m in (detailHand.dashboard || [])" :key="m.memory_key">
-                      <div class="text-sm" style="padding:2px 0"><span x-text="m.label"></span> <code class="text-xs text-dim" x-text="'(' + m.format + ')'"></code></div>
-                    </template>
-                  </div>
-                  <div class="flex gap-2">
-                    <button class="btn btn-primary btn-block" @click="var hid = detailHand.id; detailHand = null; openSetupWizard(hid)" :disabled="setupLoading">Activate</button>
-                  </div>
-                </div>
-              </div>
-            </template>
-
-            <!-- Setup Wizard (guided multi-step activation) -->
-            <template x-if="setupWizard">
-              <div class="modal-overlay" @click.self="closeSetupWizard()" @keydown.escape.window="closeSetupWizard()">
-                <div class="hand-wizard">
-                  <!-- Header -->
-                  <div class="hand-wizard-header">
-                    <span class="wizard-icon" x-text="setupWizard.icon"></span>
-                    <div>
-                      <div class="wizard-title" x-text="'Set up ' + setupWizard.name"></div>
-                      <div class="wizard-subtitle" x-text="setupWizard.description"></div>
-                    </div>
-                    <button class="wizard-close" @click="closeSetupWizard()">&times;</button>
-                  </div>
-
-                  <!-- Step Indicators -->
-                  <div class="hand-steps">
-                    <template x-if="setupHasReqs">
-                      <div class="hand-step-item" :class="{ active: setupStep === 1, done: setupStep > 1 }">
-                        <div class="hand-step-num" x-text="setupStep > 1 ? '\u2713' : '1'"></div>
-                        <div class="hand-step-label">Dependencies</div>
-                      </div>
-                    </template>
-                    <template x-if="setupHasReqs">
-                      <div class="hand-step-line" :class="{ done: setupStep > 1 }"></div>
-                    </template>
-                    <div class="hand-step-item" :class="{ active: setupStep === 2, done: setupStep > 2 }">
-                      <div class="hand-step-num" x-text="setupStep > 2 ? '\u2713' : (setupHasReqs ? '2' : '1')"></div>
-                      <div class="hand-step-label">Configure</div>
-                    </div>
-                    <div class="hand-step-line" :class="{ done: setupStep > 2 }"></div>
-                    <div class="hand-step-item" :class="{ active: setupStep === 3 }">
-                      <div class="hand-step-num" x-text="setupHasReqs ? '3' : '2'"></div>
-                      <div class="hand-step-label">Launch</div>
-                    </div>
-                  </div>
-
-                  <!-- ═══ Step 1: Dependencies ═══ -->
-                  <div class="hand-wizard-body" x-show="setupStep === 1">
-                    <template x-for="req in (setupWizard.requirements || [])" :key="req.key">
-                      <div class="dep-card" :class="req.satisfied ? 'dep-met' : 'dep-missing'">
-                        <div class="dep-card-header">
-                          <div class="dep-status-icon" :class="[req.satisfied ? 'met' : 'missing', setupChecking ? 'checking' : '']" x-text="req.satisfied ? '\u2713' : '\u2717'"></div>
-                          <span class="dep-card-title" x-text="req.label"></span>
-                          <template x-if="req.install && req.install.estimated_time">
-                            <span class="dep-time-badge" x-text="req.install.estimated_time"></span>
-                          </template>
-                        </div>
-                        <template x-if="req.description">
-                          <div class="dep-card-desc" x-text="req.description"></div>
-                        </template>
-
-                        <!-- Satisfied: green message -->
-                        <template x-if="req.satisfied">
-                          <div class="dep-met-msg">&check; Detected on your system</div>
-                        </template>
-
-                        <!-- Not satisfied: show install instructions -->
-                        <template x-if="!req.satisfied">
-                          <div>
-                            <!-- Binary/EnvVar: platform install commands -->
-                            <template x-if="req.type !== 'ApiKey' && req.install && (req.install.macos || req.install.windows || req.install.linux_apt)">
-                              <div class="install-block">
-                                <div class="install-platform-pills">
-                                  <button class="install-platform-pill" :class="{ active: (installPlatforms[req.key] || detectedPlatform) === 'macos' }" @click="installPlatforms[req.key] = 'macos'" x-show="req.install.macos">macOS</button>
-                                  <button class="install-platform-pill" :class="{ active: (installPlatforms[req.key] || detectedPlatform) === 'windows' }" @click="installPlatforms[req.key] = 'windows'" x-show="req.install.windows">Windows</button>
-                                  <button class="install-platform-pill" :class="{ active: (installPlatforms[req.key] || detectedPlatform) === 'linux' }" @click="installPlatforms[req.key] = 'linux'" x-show="req.install.linux_apt || req.install.linux_dnf || req.install.linux_pacman">Linux</button>
-                                  <button class="install-platform-pill" :class="{ active: (installPlatforms[req.key] || detectedPlatform) === 'pip' }" @click="installPlatforms[req.key] = 'pip'" x-show="req.install.pip && !req.install.macos">pip</button>
-                                </div>
-                                <div class="install-cmd">
-                                  <code x-text="getInstallCmd(req) || 'No command available'"></code>
-                                  <button class="copy-btn" :class="{ copied: clipboardMsg === getInstallCmd(req) }" @click="copyToClipboard(getInstallCmd(req))" x-text="clipboardMsg === getInstallCmd(req) ? 'Copied!' : 'Copy'"></button>
-                                </div>
-                              </div>
-                            </template>
-
-                            <!-- Install steps (e.g. multi-step like playwright) -->
-                            <template x-if="req.install && req.install.steps && req.install.steps.length && req.type !== 'ApiKey'">
-                              <ol class="api-key-steps" style="margin-top:8px">
-                                <template x-for="step in req.install.steps" :key="step">
-                                  <li x-text="step"></li>
-                                </template>
-                              </ol>
-                            </template>
-
-                            <!-- API Key: numbered steps + signup link -->
-                            <template x-if="req.type === 'ApiKey' && req.install">
-                              <div>
-                                <template x-if="req.install.steps && req.install.steps.length">
-                                  <ol class="api-key-steps">
-                                    <template x-for="step in req.install.steps" :key="step">
-                                      <li x-text="step"></li>
-                                    </template>
-                                  </ol>
-                                </template>
-                                <template x-if="req.install.env_example">
-                                  <div class="install-block" style="margin-top:8px">
-                                    <div class="install-cmd">
-                                      <code x-text="req.install.env_example"></code>
-                                      <button class="copy-btn" :class="{ copied: clipboardMsg === req.install.env_example }" @click="copyToClipboard(req.install.env_example)" x-text="clipboardMsg === req.install.env_example ? 'Copied!' : 'Copy'"></button>
-                                    </div>
-                                  </div>
-                                </template>
-                                <div class="flex gap-2 mt-2">
-                                  <template x-if="req.install.signup_url">
-                                    <a :href="req.install.signup_url" target="_blank" rel="noopener" class="btn btn-primary btn-sm">Get API Key &rarr;</a>
-                                  </template>
-                                  <template x-if="req.install.docs_url">
-                                    <a :href="req.install.docs_url" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Docs</a>
-                                  </template>
-                                </div>
-                              </div>
-                            </template>
-
-                            <!-- Manual download link -->
-                            <template x-if="req.install && req.install.manual_url && req.type !== 'ApiKey'">
-                              <div style="margin-top:6px">
-                                <a :href="req.install.manual_url" target="_blank" rel="noopener" class="text-xs" style="color:var(--accent)">Manual download &rarr;</a>
-                              </div>
-                            </template>
-                          </div>
-                        </template>
-                      </div>
-                    </template>
-
-                    <!-- Auto-Install Progress -->
-                    <template x-if="installProgress">
-                      <div class="install-progress-panel">
-                        <div class="install-progress-header">
-                          <template x-if="installProgress.status === 'installing'">
-                            <div class="flex items-center gap-2">
-                              <span class="spinner-sm"></span>
-                              <span class="text-sm font-bold">Installing dependencies...</span>
-                            </div>
-                          </template>
-                          <template x-if="installProgress.status === 'done' && !installProgress.error">
-                            <div class="flex items-center gap-2">
-                              <span style="color:var(--green);font-size:16px">&check;</span>
-                              <span class="text-sm font-bold" style="color:var(--green)">Installation complete!</span>
-                            </div>
-                          </template>
-                          <template x-if="installProgress.error">
-                            <div class="flex items-center gap-2">
-                              <span style="color:var(--red);font-size:16px">&cross;</span>
-                              <span class="text-sm" style="color:var(--red)" x-text="installProgress.error"></span>
-                            </div>
-                          </template>
-                        </div>
-
-                        <!-- Per-dep results -->
-                        <template x-if="installProgress.results.length > 0">
-                          <div class="install-results-list">
-                            <template x-for="r in installProgress.results" :key="r.key">
-                              <div class="install-result-row" :class="getInstallResultClass(r.status)">
-                                <span class="install-result-icon" x-text="getInstallResultIcon(r.status)"></span>
-                                <span class="text-sm" x-text="r.key"></span>
-                                <span class="text-xs text-dim" style="margin-left:auto" x-text="r.message"></span>
-                              </div>
-                            </template>
-                          </div>
-                        </template>
-
-                        <!-- Installing spinner for current dep -->
-                        <template x-if="installProgress.status === 'installing' && installProgress.results.length === 0">
-                          <div class="install-results-list">
-                            <template x-for="req in (setupWizard.requirements || []).filter(r => !r.satisfied)" :key="req.key">
-                              <div class="install-result-row">
-                                <span class="spinner-sm"></span>
-                                <span class="text-sm" x-text="req.label"></span>
-                                <span class="text-xs text-dim" style="margin-left:auto">Waiting...</span>
-                              </div>
-                            </template>
-                          </div>
-                        </template>
-                      </div>
-                    </template>
-
-                    <!-- Progress bar -->
-                    <div class="dep-progress">
-                      <div class="dep-progress-label">
-                        <span x-text="setupReqsMet + ' of ' + setupReqsTotal + ' ready'"></span>
-                        <span class="text-dim" x-text="setupAllReqsMet ? 'All set!' : 'Install missing dependencies above'"></span>
-                      </div>
-                      <div class="dep-progress-bar">
-                        <div class="dep-progress-fill" :style="'width:' + (setupReqsTotal ? Math.round(setupReqsMet / setupReqsTotal * 100) : 0) + '%'"></div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- ═══ Step 2: Configure ═══ -->
-                  <div class="hand-wizard-body" x-show="setupStep === 2">
-                    <template x-if="!setupHasSettings">
-                      <div class="text-sm text-dim" style="text-align:center;padding:20px 0">No configuration needed for this hand. Click Next to continue.</div>
-                    </template>
-                    <template x-for="setting in (setupWizard.settings || [])" :key="setting.key">
-                      <div class="mb-4">
-                        <div class="text-xs text-dim mb-1" style="letter-spacing:0.5px;text-transform:uppercase" x-text="setting.label"></div>
-                        <div class="text-xs text-dim mb-2" x-show="setting.description" x-text="setting.description"></div>
-
-                        <!-- Select type: clickable option cards -->
-                        <template x-if="setting.setting_type === 'select'">
-                          <div style="display:flex;flex-direction:column;gap:6px">
-                            <template x-for="opt in setting.options" :key="opt.value">
-                              <div class="setting-option-card" :class="{ 'setting-option-selected': settingsValues[setting.key] === opt.value }" @click="selectOption(setting.key, opt.value)" style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;transition:all 0.15s">
-                                <div>
-                                  <div class="text-sm" x-text="opt.label"></div>
-                                  <div class="text-xs text-dim" x-show="opt.provider_env" x-text="opt.provider_env"></div>
-                                  <div class="text-xs text-dim" x-show="opt.binary" x-text="'Requires: ' + opt.binary"></div>
-                                </div>
-                                <span class="badge" :class="opt.available ? 'badge-success' : 'badge-dim'" x-text="opt.available ? 'Ready' : 'Missing'" style="font-size:0.65rem"></span>
-                              </div>
-                            </template>
-                          </div>
-                        </template>
-
-                        <!-- Toggle type -->
-                        <template x-if="setting.setting_type === 'toggle'">
-                          <label class="flex items-center gap-2" style="cursor:pointer">
-                            <input type="checkbox" :checked="settingsValues[setting.key] === 'true'" @change="settingsValues[setting.key] = $event.target.checked ? 'true' : 'false'">
-                            <span class="text-sm" x-text="settingsValues[setting.key] === 'true' ? 'Enabled' : 'Disabled'"></span>
-                          </label>
-                        </template>
-
-                        <!-- Text type -->
-                        <template x-if="setting.setting_type === 'text'">
-                          <input type="text" class="input" x-model="settingsValues[setting.key]" :placeholder="setting.label" style="width:100%">
-                        </template>
-                      </div>
-                    </template>
-                  </div>
-
-                  <!-- ═══ Step 3: Launch ═══ -->
-                  <div class="hand-wizard-body" x-show="setupStep === 3">
-                    <div class="launch-summary">
-                      <div class="launch-summary-icon" x-text="setupWizard.icon"></div>
-                      <div class="launch-summary-title" x-text="setupWizard.name"></div>
-
-                      <div class="launch-summary-rows">
-                        <!-- Dependencies summary -->
-                        <template x-if="setupHasReqs">
-                          <div class="launch-summary-row">
-                            <span class="row-label">Dependencies</span>
-                            <span class="row-check" x-text="setupReqsMet + '/' + setupReqsTotal + ' \u2713'"></span>
-                          </div>
-                        </template>
-
-                        <!-- Settings summary -->
-                        <template x-for="setting in (setupWizard.settings || [])" :key="setting.key">
-                          <div class="launch-summary-row">
-                            <span class="row-label" x-text="setting.label"></span>
-                            <span class="row-value" x-text="getSettingDisplayValue(setting)"></span>
-                          </div>
-                        </template>
-
-                        <!-- Provider / Model -->
-                        <template x-if="setupWizard.agent">
-                          <div class="launch-summary-row">
-                            <span class="row-label">Model</span>
-                            <span class="row-value" x-text="(setupWizard.agent.provider || 'default') + ' / ' + (setupWizard.agent.model || 'default')"></span>
-                          </div>
-                        </template>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Navigation -->
-                  <div class="hand-wizard-nav">
-                    <div>
-                      <button class="btn btn-ghost" @click="closeSetupWizard()">Cancel</button>
-                      <button class="btn btn-ghost" x-show="(setupStep === 2 && setupHasReqs) || setupStep === 3" @click="setupPrevStep()" style="margin-left:4px">Back</button>
-                    </div>
-                    <div class="flex gap-2">
-                      <!-- Step 1: Install + Verify + Next -->
-                      <template x-if="setupStep === 1">
-                        <div class="flex gap-2">
-                          <template x-if="!setupAllReqsMet">
-                            <button class="btn btn-success" @click="installDeps()" :disabled="installProgress && installProgress.status === 'installing'" x-text="(installProgress && installProgress.status === 'installing') ? 'Installing...' : 'Install All'">
-                            </button>
-                          </template>
-                          <button class="btn btn-ghost" @click="recheckDeps()" :disabled="setupChecking" x-text="setupChecking ? 'Checking...' : 'Verify'"></button>
-                          <button class="btn btn-primary" @click="setupNextStep()" :disabled="!setupAllReqsMet">Next</button>
-                        </div>
-                      </template>
-                      <!-- Step 2: Next -->
-                      <template x-if="setupStep === 2">
-                        <button class="btn btn-primary" @click="setupNextStep()">Next</button>
-                      </template>
-                      <!-- Step 3: Activate -->
-                      <template x-if="setupStep === 3">
-                        <button class="btn btn-success btn-launch" @click="launchHand()" :disabled="activatingId" x-text="activatingId ? 'Activating...' : 'Activate ' + setupWizard.name"></button>
-                      </template>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </template>
-          </div>
-
-          <!-- Browser Viewer Modal -->
-          <template x-if="browserViewerOpen">
-            <div class="modal-overlay" @click.self="closeBrowserViewer()" @keydown.escape.window="closeBrowserViewer()">
-              <div class="browser-viewer">
-                <div class="browser-viewer-header">
-                  <div class="browser-url-bar">
-                    <span class="browser-dot red"></span>
-                    <span class="browser-dot yellow"></span>
-                    <span class="browser-dot green"></span>
-                    <span class="browser-url" x-text="browserViewer ? (browserViewer.url || 'about:blank') : 'about:blank'"></span>
-                  </div>
-                  <button class="btn btn-ghost btn-sm" @click="refreshBrowserView()">Refresh</button>
-                  <button class="btn btn-ghost btn-sm" @click="closeBrowserViewer()">Close</button>
-                </div>
-                <div class="browser-viewer-body">
-                  <!-- Loading -->
-                  <div x-show="browserViewer && browserViewer.loading" class="text-center text-dim" style="padding:40px">
-                    Loading browser state...
-                  </div>
-                  <!-- Error -->
-                  <div x-show="browserViewer && browserViewer.error && !browserViewer.loading" class="text-center" style="padding:40px;color:var(--error)">
-                    <div style="font-size:2rem;margin-bottom:8px">!</div>
-                    <span x-text="browserViewer ? browserViewer.error : ''"></span>
-                  </div>
-                  <!-- Screenshot -->
-                  <div class="browser-screenshot" x-show="browserViewer && browserViewer.screenshot && !browserViewer.loading">
-                    <img x-bind:src="browserViewer && browserViewer.screenshot ? ('data:image/png;base64,' + browserViewer.screenshot) : ''" alt="Browser screenshot" style="max-width:100%;border-radius:4px;display:block">
-                  </div>
-                  <!-- Page info -->
-                  <div class="browser-info" x-show="browserViewer && !browserViewer.loading && !browserViewer.error">
-                    <div class="text-dim text-sm">Title: <span x-text="browserViewer ? (browserViewer.title || '-') : '-'"></span></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <!-- Activation result toast -->
-          <div x-show="activateResult" x-transition class="info-card" style="position:fixed;bottom:24px;right:24px;z-index:200;max-width:360px" @click="activateResult = null">
-            <div class="flex items-center gap-2">
-              <span style="color:var(--success);font-size:1.2rem">\u2713</span>
-              <span x-text="activateResult"></span>
-            </div>
-          </div>
-        </div>
-      </div>
     </template>
 
     <!-- Page: Settings -->
@@ -4070,176 +3562,6 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
               <h4>No audit entries yet</h4>
               <p class="hint">Activity will appear here as agents operate.</p>
             </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </template>
-
-    <!-- Page: Comms -->
-    <template x-if="page === 'comms'">
-      <div x-data="commsPage" x-init="loadData()" @page-leave.window="stopSSE()">
-        <div class="page-header">
-          <h2>Agent Comms</h2>
-          <div class="flex items-center gap-2">
-            <button class="btn btn-primary btn-sm" @click="openSendModal()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>
-              Send Message
-            </button>
-            <button class="btn btn-ghost btn-sm" @click="openTaskModal()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-              Post Task
-            </button>
-            <button class="btn btn-ghost btn-sm" @click="loadData()" title="Refresh">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0115-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 01-15 6.7L3 16"/></svg>
-            </button>
-          </div>
-        </div>
-        <div class="page-body">
-          <!-- Loading -->
-          <div x-show="loading" style="animation:fadeIn 0.2s">
-            <div class="card mb-4"><div class="skeleton skeleton-text" style="width:160px;margin-bottom:8px"></div><div class="skeleton skeleton-card" style="height:120px"></div></div>
-            <div class="card"><div class="skeleton skeleton-text" style="width:120px;margin-bottom:8px"></div><div class="skeleton skeleton-card" style="height:200px"></div></div>
-          </div>
-          <!-- Error -->
-          <div x-show="!loading && loadError" class="error-state" style="animation:fadeIn 0.3s">
-            <h3 style="color:var(--error)">Connection Error</h3>
-            <p class="text-xs text-dim" x-text="loadError"></p>
-            <button class="btn btn-primary btn-sm" @click="loadData()" style="margin-top:8px">Retry</button>
-          </div>
-          <!-- Content -->
-          <div x-show="!loading && !loadError" style="animation:fadeIn 0.3s">
-            <!-- Topology -->
-            <div class="card mb-4">
-              <div class="card-header">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;margin-right:4px;vertical-align:-2px"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98"/></svg>
-                Agent Topology
-                <span class="badge badge-dim" style="margin-left:8px;font-weight:400" x-text="topology.nodes.length + ' agents'"></span>
-              </div>
-              <div style="padding:8px 0;font-family:var(--font-mono);font-size:12px;line-height:1.8">
-                <template x-if="topology.nodes.length === 0">
-                  <div class="text-dim" style="text-align:center;padding:24px">No agents running</div>
-                </template>
-                <template x-for="root in rootNodes()" :key="root.id">
-                  <div class="comms-topo-tree">
-                    <div class="comms-topo-node" :title="root.id">
-                      <span :class="stateBadgeClass(root.state)" style="font-size:10px;padding:1px 6px" x-text="root.state"></span>
-                      <strong x-text="root.name" style="margin:0 4px"></strong>
-                      <span class="text-dim" x-text="root.model"></span>
-                      <template x-for="peer in peersOf(root.id)" :key="peer.id">
-                        <span class="text-dim" style="margin-left:8px" x-text="'\u2194 ' + peer.name"></span>
-                      </template>
-                    </div>
-                    <template x-for="(child, ci) in childrenOf(root.id)" :key="child.id">
-                      <div class="comms-topo-child">
-                        <span class="comms-topo-branch" x-text="ci < childrenOf(root.id).length - 1 ? '\u251c\u2500\u2500 ' : '\u2514\u2500\u2500 '"></span>
-                        <span :class="stateBadgeClass(child.state)" style="font-size:10px;padding:1px 6px" x-text="child.state"></span>
-                        <strong x-text="child.name" style="margin:0 4px"></strong>
-                        <span class="text-dim" x-text="child.model"></span>
-                      </div>
-                    </template>
-                  </div>
-                </template>
-              </div>
-            </div>
-
-            <!-- Live Event Feed -->
-            <div class="card">
-              <div class="card-header flex justify-between items-center">
-                <div>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;margin-right:4px;vertical-align:-2px"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-                  Live Event Feed
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="badge badge-success" style="font-size:9px;padding:2px 6px;animation:pulse-ring 2s infinite">LIVE</span>
-                  <span class="text-xs text-dim" x-text="events.length + ' events'"></span>
-                </div>
-              </div>
-              <div style="max-height:400px;overflow-y:auto">
-                <template x-if="events.length === 0">
-                  <div class="text-dim" style="text-align:center;padding:24px">No inter-agent events yet</div>
-                </template>
-                <template x-for="ev in events" :key="ev.id">
-                  <div class="comms-event-row">
-                    <span class="comms-event-time text-xs text-dim" x-text="timeAgo(ev.timestamp)"></span>
-                    <span :class="eventBadgeClass(ev.kind)" style="font-size:10px;padding:1px 6px;min-width:70px;text-align:center" x-text="eventLabel(ev.kind)"></span>
-                    <span style="font-weight:600;font-size:12px" x-text="ev.source_name"></span>
-                    <span class="text-dim" x-show="ev.target_name" x-text="'\u2192 ' + ev.target_name"></span>
-                    <span class="comms-event-detail text-dim text-xs" x-text="ev.detail" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
-                  </div>
-                </template>
-              </div>
-            </div>
-          </div>
-
-          <!-- Send Message Modal -->
-          <div x-show="showSendModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px)" @click.self="showSendModal=false" x-transition>
-            <div class="card" style="width:420px;max-width:90vw" @click.stop>
-              <div class="card-header">Send Agent Message</div>
-              <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px">
-                <div>
-                  <label class="text-xs text-dim" style="display:block;margin-bottom:4px">From Agent</label>
-                  <select x-model="sendFrom" class="input" style="width:100%">
-                    <option value="">Select agent...</option>
-                    <template x-for="n in topology.nodes" :key="n.id">
-                      <option :value="n.id" x-text="n.name + ' (' + n.state + ')'"></option>
-                    </template>
-                  </select>
-                </div>
-                <div>
-                  <label class="text-xs text-dim" style="display:block;margin-bottom:4px">To Agent</label>
-                  <select x-model="sendTo" class="input" style="width:100%">
-                    <option value="">Select agent...</option>
-                    <template x-for="n in topology.nodes" :key="n.id">
-                      <option :value="n.id" x-text="n.name + ' (' + n.state + ')'"></option>
-                    </template>
-                  </select>
-                </div>
-                <div>
-                  <label class="text-xs text-dim" style="display:block;margin-bottom:4px">Message</label>
-                  <textarea x-model="sendMsg" class="input" rows="3" placeholder="Type a message..." style="width:100%;resize:vertical"></textarea>
-                </div>
-                <div class="flex gap-2" style="justify-content:flex-end">
-                  <button class="btn btn-ghost btn-sm" @click="showSendModal=false">Cancel</button>
-                  <button class="btn btn-primary btn-sm" @click="submitSend()" :disabled="sendLoading || !sendFrom || !sendTo || !sendMsg.trim()">
-                    <span x-show="sendLoading">Sending...</span>
-                    <span x-show="!sendLoading">Send</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Post Task Modal -->
-          <div x-show="showTaskModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px)" @click.self="showTaskModal=false" x-transition>
-            <div class="card" style="width:420px;max-width:90vw" @click.stop>
-              <div class="card-header">Post Task</div>
-              <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px">
-                <div>
-                  <label class="text-xs text-dim" style="display:block;margin-bottom:4px">Title</label>
-                  <input type="text" x-model="taskTitle" class="input" placeholder="Task title..." style="width:100%">
-                </div>
-                <div>
-                  <label class="text-xs text-dim" style="display:block;margin-bottom:4px">Description</label>
-                  <textarea x-model="taskDesc" class="input" rows="3" placeholder="Task description..." style="width:100%;resize:vertical"></textarea>
-                </div>
-                <div>
-                  <label class="text-xs text-dim" style="display:block;margin-bottom:4px">Assign To (optional)</label>
-                  <select x-model="taskAssign" class="input" style="width:100%">
-                    <option value="">Unassigned</option>
-                    <template x-for="n in topology.nodes" :key="n.id">
-                      <option :value="n.id" x-text="n.name"></option>
-                    </template>
-                  </select>
-                </div>
-                <div class="flex gap-2" style="justify-content:flex-end">
-                  <button class="btn btn-ghost btn-sm" @click="showTaskModal=false">Cancel</button>
-                  <button class="btn btn-primary btn-sm" @click="submitTask()" :disabled="taskLoading || !taskTitle.trim()">
-                    <span x-show="taskLoading">Posting...</span>
-                    <span x-show="!taskLoading">Post Task</span>
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         </div>

@@ -28,66 +28,42 @@ function logsPage() {
     auditLoadError: '',
 
     startStreaming: function() {
+      // openclaw uses WebSocket gateway — no SSE endpoint exists.
+      // Subscribe to gateway events directly for real-time log entries.
       var self = this;
-      if (this._eventSource) { this._eventSource.close(); this._eventSource = null; }
+      if (this._eventSource) { this._eventSource = null; }
 
-      var url = '/api/logs/stream';
-      var sep = '?';
-      var token = OpenFangAPI.getToken();
-      if (token) { url += sep + 'token=' + encodeURIComponent(token); sep = '&'; }
-
-      try {
-        this._eventSource = new EventSource(url);
-      } catch(e) {
-        // EventSource not supported or blocked; fall back to polling
-        this.streamConnected = false;
-        this.startPolling();
-        return;
-      }
-
-      this._eventSource.onopen = function() {
-        self.streamConnected = true;
-        self.loading = false;
-        self.loadError = '';
-      };
-
-      this._eventSource.onmessage = function(event) {
+      this._gwEventHandler = function(event, payload) {
         if (self.streamPaused) return;
-        try {
-          var entry = JSON.parse(event.data);
-          // Avoid duplicate entries by checking seq
-          var dominated = false;
-          for (var i = 0; i < self.entries.length; i++) {
-            if (self.entries[i].seq === entry.seq) { dominated = true; break; }
+        // Build a log entry from any gateway event
+        var entry = {
+          seq: Date.now() + Math.random(),
+          timestamp: new Date().toISOString(),
+          action: event,
+          detail: payload ? (payload.sessionKey ? '[' + payload.sessionKey + '] ' : '') + JSON.stringify(payload).slice(0, 120) : '',
+          agent_id: payload && (payload.sessionKey || payload.agent_id || null)
+        };
+        var dominated = false;
+        for (var i = 0; i < self.entries.length; i++) {
+          if (self.entries[i].seq === entry.seq) { dominated = true; break; }
+        }
+        if (!dominated) {
+          self.entries.push(entry);
+          if (self.entries.length > 500) self.entries.splice(0, self.entries.length - 500);
+          if (self.autoRefresh && !self.hovering) {
+            self.$nextTick(function() {
+              var el = document.getElementById('log-container');
+              if (el) el.scrollTop = el.scrollHeight;
+            });
           }
-          if (!dominated) {
-            self.entries.push(entry);
-            // Cap at 500 entries (remove oldest)
-            if (self.entries.length > 500) {
-              self.entries.splice(0, self.entries.length - 500);
-            }
-            // Auto-scroll to bottom
-            if (self.autoRefresh && !self.hovering) {
-              self.$nextTick(function() {
-                var el = document.getElementById('log-container');
-                if (el) el.scrollTop = el.scrollHeight;
-              });
-            }
-          }
-        } catch(e) {
-          // Ignore parse errors (heartbeat comments are not delivered to onmessage)
         }
       };
 
-      this._eventSource.onerror = function() {
-        self.streamConnected = false;
-        if (self._eventSource) {
-          self._eventSource.close();
-          self._eventSource = null;
-        }
-        // Fall back to polling
-        self.startPolling();
-      };
+      OpenFangAPI.onEvent(this._gwEventHandler);
+      this.streamConnected = true;
+      this.loading = false;
+      // Also do an initial poll to populate existing entries
+      this.fetchLogs();
     },
 
     startPolling: function() {
@@ -248,8 +224,10 @@ function logsPage() {
     },
 
     destroy: function() {
-      if (this._eventSource) { this._eventSource.close(); this._eventSource = null; }
+      if (this._gwEventHandler) { OpenFangAPI.offEvent(this._gwEventHandler); this._gwEventHandler = null; }
+      if (this._eventSource) { this._eventSource = null; }
       if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
+      this.streamConnected = false;
     }
   };
 }

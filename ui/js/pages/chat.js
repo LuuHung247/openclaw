@@ -40,7 +40,6 @@ function chatPage() {
       { cmd: '/new', desc: 'Reset session (clear history)' },
       { cmd: '/compact', desc: 'Trigger LLM session compaction' },
       { cmd: '/model', desc: 'Show or switch model (/model [name])' },
-      { cmd: '/stop', desc: 'Cancel current agent run' },
       { cmd: '/usage', desc: 'Show session token usage & cost' },
       { cmd: '/think', desc: 'Toggle extended thinking (/think [on|off|stream])' },
       { cmd: '/context', desc: 'Show context window usage & pressure' },
@@ -121,6 +120,9 @@ function chatPage() {
       if (store.pendingAgent) {
         self.selectAgent(store.pendingAgent);
         store.pendingAgent = null;
+      } else {
+        // Auto-load first available agent (standalone chat page)
+        self.autoLoadAgent();
       }
 
       // Watch for future pending agent selections (e.g., user clicks agent while on chat)
@@ -375,6 +377,15 @@ function chatPage() {
       }
     },
 
+    async autoLoadAgent() {
+      var store = Alpine.store('app');
+      await store.refreshAgents();
+      var agents = store.agents || [];
+      if (agents.length > 0) {
+        this.selectAgent(agents[0]);
+      }
+    },
+
     selectAgent(agent) {
       this.currentAgent = agent;
       this.messages = [];
@@ -385,7 +396,7 @@ function chatPage() {
         this.messages.push({
           id: ++localMsgId,
           role: 'system',
-          text: '**Welcome to OpenFang Chat!**\n\n' +
+          text: '**Welcome to OpenClaw Chat!**\n\n' +
             '- Type `/` to see available commands\n' +
             '- `/help` shows all commands\n' +
             '- `/think on` enables extended reasoning\n' +
@@ -412,25 +423,61 @@ function chatPage() {
       try {
         var data = await OpenFangAPI.get('/api/agents/' + agentId + '/session');
         if (data.messages && data.messages.length) {
-          self.messages = data.messages.map(function(m) {
+          var parsed = [];
+          data.messages.forEach(function(m) {
             var role = m.role === 'User' ? 'user' : (m.role === 'System' ? 'system' : 'agent');
-            var text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-            // Sanitize any raw function-call text from history
-            text = self.sanitizeToolText(text);
-            // Build tool cards from historical tool data
-            var tools = (m.tools || []).map(function(t, idx) {
-              return {
-                id: (t.name || 'tool') + '-hist-' + idx,
-                name: t.name || 'unknown',
-                running: false,
-                expanded: false,
-                input: t.input || '',
-                result: t.result || '',
-                is_error: !!t.is_error
-              };
-            });
-            return { id: ++msgId, role: role, text: text, meta: '', tools: tools };
+            var content = m.content;
+
+            // content is array of blocks: [{type:"text",...},{type:"thinking",...},{type:"toolCall",...},{type:"toolResult",...}]
+            if (Array.isArray(content)) {
+              var textParts = [];
+              var tools = [];
+              var toolResultMap = {}; // toolUseId -> result
+
+              // First pass: collect toolResults
+              content.forEach(function(b) {
+                if (b.type === 'toolResult' && b.toolUseId) {
+                  var res = '';
+                  if (typeof b.content === 'string') res = b.content;
+                  else if (Array.isArray(b.content)) res = b.content.filter(function(x) { return x.type === 'text'; }).map(function(x) { return x.text; }).join('\n');
+                  toolResultMap[b.toolUseId] = { result: res, is_error: !!b.isError };
+                }
+              });
+
+              // Second pass: build text + tool cards
+              content.forEach(function(b, idx) {
+                if (b.type === 'text' && b.text) {
+                  textParts.push(b.text);
+                } else if (b.type === 'toolCall' || b.type === 'tool_use') {
+                  var toolId = b.id || b.toolUseId || ('tool-hist-' + idx);
+                  var toolResult = toolResultMap[toolId] || {};
+                  var inputStr = '';
+                  try { inputStr = typeof b.arguments === 'string' ? b.arguments : JSON.stringify(b.arguments || b.input || '', null, 2); } catch(e) {}
+                  tools.push({
+                    id: toolId + '-hist',
+                    name: b.name || b.toolName || 'tool',
+                    running: false,
+                    expanded: false,
+                    input: inputStr,
+                    result: toolResult.result || '',
+                    is_error: !!toolResult.is_error
+                  });
+                }
+                // skip thinking blocks — don't show in history
+              });
+
+              var text = self.sanitizeToolText(textParts.join('\n'));
+              parsed.push({ id: ++msgId, role: role, text: text, meta: '', tools: tools });
+            } else {
+              // Plain string content
+              var text2 = self.sanitizeToolText(extractContentText(content));
+              var tools2 = (m.tools || []).map(function(t, idx2) {
+                return { id: (t.name || 'tool') + '-hist-' + idx2, name: t.name || 'unknown', running: false, expanded: false, input: t.input || '', result: t.result || '', is_error: !!t.is_error };
+              });
+              parsed.push({ id: ++msgId, role: role, text: text2, meta: '', tools: tools2 });
+            }
           });
+          self.messages = parsed;
           self.$nextTick(function() { self.scrollToBottom(); });
         }
       } catch(e) { /* silent */ }
@@ -562,7 +609,7 @@ function chatPage() {
             if (last.thinking) { last.text = ''; last.thinking = false; }
             // If we already detected a text-based tool call, skip further text
             if (last._toolTextDetected) break;
-            last.text += data.content;
+            last.text += extractContentText(data.content);
             // Detect function-call patterns streamed as text and convert to tool cards
             var fcIdx = last.text.search(/\w+<\/function[=,>]/);
             if (fcIdx === -1) fcIdx = last.text.search(/<function=\w+>/);
@@ -587,7 +634,7 @@ function chatPage() {
             }
             this.tokenCount = Math.round(last.text.length / 4);
           } else {
-            this.messages.push({ id: ++msgId, role: 'agent', text: data.content, meta: '', streaming: true, tools: [] });
+            this.messages.push({ id: ++msgId, role: 'agent', text: extractContentText(data.content), meta: '', streaming: true, tools: [] });
           }
           this.scrollToBottom();
           break;
@@ -678,7 +725,8 @@ function chatPage() {
           if (data.iterations) meta += ' | ' + data.iterations + ' iter';
           if (data.fallback_model) meta += ' | fallback: ' + data.fallback_model;
           // Use server response if non-empty, otherwise preserve accumulated streamed text
-          var finalText = (data.content && data.content.trim()) ? data.content : streamedText;
+          var _resolvedContent = extractContentText(data.content);
+          var finalText = (_resolvedContent && _resolvedContent.trim()) ? _resolvedContent : streamedText;
           // Strip raw function-call JSON that some models leak as text
           finalText = this.sanitizeToolText(finalText);
           // If text is empty but tools ran, show a summary
@@ -1105,4 +1153,18 @@ function chatPage() {
     renderMarkdown: renderMarkdown,
     escapeHtml: escapeHtml
   };
+}
+
+// Extract plain text from openclaw content block format:
+// content can be: string | [{type:"text",text:"..."},...] | [{type:"thinking",...},{type:"text",...}]
+function extractContentText(content) {
+  if (!content) return '';
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(function(b) { return b && b.type === 'text' && typeof b.text === 'string'; })
+      .map(function(b) { return b.text; })
+      .join('\n');
+  }
+  return String(content);
 }
