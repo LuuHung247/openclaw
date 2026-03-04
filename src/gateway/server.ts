@@ -618,7 +618,7 @@ function formatForLog(value: unknown): string {
       if (value.message) parts.push(value.message);
       const code =
         "code" in value &&
-        (typeof value.code === "string" || typeof value.code === "number")
+          (typeof value.code === "string" || typeof value.code === "number")
           ? String(value.code)
           : "";
       if (code) parts.push(`code=${code}`);
@@ -881,7 +881,7 @@ function listSessionsFromStore(params: {
   const includeUnknown = opts.includeUnknown === true;
   const activeMinutes =
     typeof opts.activeMinutes === "number" &&
-    Number.isFinite(opts.activeMinutes)
+      Number.isFinite(opts.activeMinutes)
       ? Math.max(1, Math.floor(opts.activeMinutes))
       : undefined;
 
@@ -906,13 +906,13 @@ function listSessionsFromStore(params: {
         entry?.displayName ??
         (surface
           ? buildGroupDisplayName({
-              surface,
-              subject,
-              room,
-              space,
-              id,
-              key,
-            })
+            surface,
+            subject,
+            room,
+            space,
+            id,
+            key,
+          })
           : undefined);
       return {
         key,
@@ -986,11 +986,11 @@ function logWs(
   const durationMs =
     direction === "out" && kind === "res" && inflightKey
       ? (() => {
-          const startedAt = wsInflightSince.get(inflightKey);
-          if (startedAt === undefined) return undefined;
-          wsInflightSince.delete(inflightKey);
-          return now - startedAt;
-        })()
+        const startedAt = wsInflightSince.get(inflightKey);
+        if (startedAt === undefined) return undefined;
+        wsInflightSince.delete(inflightKey);
+        return now - startedAt;
+      })()
       : undefined;
 
   const dirArrow = direction === "in" ? "←" : "→";
@@ -1378,21 +1378,21 @@ export async function startGatewayServer(
     payload: Record<string, unknown>,
   ):
     | {
-        ok: true;
-        value: {
-          message: string;
-          name: string;
-          wakeMode: "now" | "next-heartbeat";
-          sessionKey: string;
-          deliver: boolean;
-          channel:
-            | "last"
-            | "telegram";
-          to?: string;
-          thinking?: string;
-          timeoutSeconds?: number;
-        };
-      }
+      ok: true;
+      value: {
+        message: string;
+        name: string;
+        wakeMode: "now" | "next-heartbeat";
+        sessionKey: string;
+        deliver: boolean;
+        channel:
+        | "last"
+        | "telegram";
+        to?: string;
+        thinking?: string;
+        timeoutSeconds?: number;
+      };
+    }
     | { ok: false; error: string } => {
     const message =
       typeof payload.message === "string" ? payload.message.trim() : "";
@@ -1410,7 +1410,7 @@ export async function startGatewayServer(
     const channelRaw = payload.channel;
     const channel =
       channelRaw === "telegram" ||
-      channelRaw === "last"
+        channelRaw === "last"
         ? channelRaw
         : channelRaw === undefined
           ? "last"
@@ -1433,8 +1433,8 @@ export async function startGatewayServer(
     const timeoutRaw = payload.timeoutSeconds;
     const timeoutSeconds =
       typeof timeoutRaw === "number" &&
-      Number.isFinite(timeoutRaw) &&
-      timeoutRaw > 0
+        Number.isFinite(timeoutRaw) &&
+        timeoutRaw > 0
         ? Math.floor(timeoutRaw)
         : undefined;
     return {
@@ -1470,8 +1470,8 @@ export async function startGatewayServer(
     sessionKey: string;
     deliver: boolean;
     channel:
-      | "last"
-      | "telegram";
+    | "last"
+    | "telegram";
     to?: string;
     thinking?: string;
     timeoutSeconds?: number;
@@ -1886,6 +1886,7 @@ export async function startGatewayServer(
   });
   let telegramAbort: AbortController | null = null;
   let telegramTask: Promise<unknown> | null = null;
+  let telegramStarting = false;
   let telegramRuntime: {
     running: boolean;
     lastStartAt?: number | null;
@@ -2025,89 +2026,94 @@ export async function startGatewayServer(
 
 
   const startTelegramProvider = async () => {
-    if (telegramTask) return;
-    const cfg = loadConfig();
-    if (cfg.telegram?.enabled === false) {
-      telegramRuntime = {
-        ...telegramRuntime,
-        running: false,
-        lastError: "disabled",
-      };
-      if (isVerbose()) {
-        logTelegram.debug(
-          "telegram provider disabled (telegram.enabled=false)",
-        );
-      }
-      return;
-    }
-    const { token: telegramToken } = resolveTelegramToken(cfg, {
-      logMissingFile: (message) => logTelegram.warn(message),
-    });
-    if (!telegramToken.trim()) {
-      telegramRuntime = {
-        ...telegramRuntime,
-        running: false,
-        lastError: "not configured",
-      };
-      // keep quiet by default; this is a normal state
-      if (isVerbose()) {
-        logTelegram.debug(
-          "telegram provider not configured (no TELEGRAM_BOT_TOKEN)",
-        );
-      }
-      return;
-    }
-    let telegramBotLabel = "";
+    if (telegramTask || telegramStarting) return;
+    telegramStarting = true;
     try {
-      const probe = await probeTelegram(
-        telegramToken.trim(),
-        2500,
-        cfg.telegram?.proxy,
-      );
-      const username = probe.ok ? probe.bot?.username?.trim() : null;
-      if (username) telegramBotLabel = ` (@${username})`;
-    } catch (err) {
-      if (isVerbose()) {
-        logTelegram.debug(`bot probe failed: ${String(err)}`);
-      }
-    }
-    logTelegram.info(
-      `starting provider${telegramBotLabel}${cfg.telegram ? "" : " (no telegram config; token via env)"}`,
-    );
-    telegramAbort = new AbortController();
-    telegramRuntime = {
-      ...telegramRuntime,
-      running: true,
-      lastStartAt: Date.now(),
-      lastError: null,
-      mode: cfg.telegram?.webhookUrl ? "webhook" : "polling",
-    };
-    const task = monitorTelegramProvider({
-      token: telegramToken.trim(),
-      runtime: telegramRuntimeEnv,
-      abortSignal: telegramAbort.signal,
-      useWebhook: Boolean(cfg.telegram?.webhookUrl),
-      webhookUrl: cfg.telegram?.webhookUrl,
-      webhookSecret: cfg.telegram?.webhookSecret,
-      webhookPath: cfg.telegram?.webhookPath,
-    })
-      .catch((err) => {
-        telegramRuntime = {
-          ...telegramRuntime,
-          lastError: formatError(err),
-        };
-        logTelegram.error(`provider exited: ${formatError(err)}`);
-      })
-      .finally(() => {
-        telegramAbort = null;
-        telegramTask = null;
+      const cfg = loadConfig();
+      if (cfg.telegram?.enabled === false) {
         telegramRuntime = {
           ...telegramRuntime,
           running: false,
-          lastStopAt: Date.now(),
+          lastError: "disabled",
         };
+        if (isVerbose()) {
+          logTelegram.debug(
+            "telegram provider disabled (telegram.enabled=false)",
+          );
+        }
+        return;
+      }
+      const { token: telegramToken } = resolveTelegramToken(cfg, {
+        logMissingFile: (message) => logTelegram.warn(message),
       });
-    telegramTask = task;
+      if (!telegramToken.trim()) {
+        telegramRuntime = {
+          ...telegramRuntime,
+          running: false,
+          lastError: "not configured",
+        };
+        // keep quiet by default; this is a normal state
+        if (isVerbose()) {
+          logTelegram.debug(
+            "telegram provider not configured (no TELEGRAM_BOT_TOKEN)",
+          );
+        }
+        return;
+      }
+      let telegramBotLabel = "";
+      try {
+        const probe = await probeTelegram(
+          telegramToken.trim(),
+          2500,
+          cfg.telegram?.proxy,
+        );
+        const username = probe.ok ? probe.bot?.username?.trim() : null;
+        if (username) telegramBotLabel = ` (@${username})`;
+      } catch (err) {
+        if (isVerbose()) {
+          logTelegram.debug(`bot probe failed: ${String(err)}`);
+        }
+      }
+      logTelegram.info(
+        `starting provider${telegramBotLabel}${cfg.telegram ? "" : " (no telegram config; token via env)"}`,
+      );
+      telegramAbort = new AbortController();
+      telegramRuntime = {
+        ...telegramRuntime,
+        running: true,
+        lastStartAt: Date.now(),
+        lastError: null,
+        mode: cfg.telegram?.webhookUrl ? "webhook" : "polling",
+      };
+      const task = monitorTelegramProvider({
+        token: telegramToken.trim(),
+        runtime: telegramRuntimeEnv,
+        abortSignal: telegramAbort.signal,
+        useWebhook: Boolean(cfg.telegram?.webhookUrl),
+        webhookUrl: cfg.telegram?.webhookUrl,
+        webhookSecret: cfg.telegram?.webhookSecret,
+        webhookPath: cfg.telegram?.webhookPath,
+      })
+        .catch((err) => {
+          telegramRuntime = {
+            ...telegramRuntime,
+            lastError: formatError(err),
+          };
+          logTelegram.error(`provider exited: ${formatError(err)}`);
+        })
+        .finally(() => {
+          telegramAbort = null;
+          telegramTask = null;
+          telegramRuntime = {
+            ...telegramRuntime,
+            running: false,
+            lastStopAt: Date.now(),
+          };
+        });
+      telegramTask = task;
+    } finally {
+      telegramStarting = false;
+    }
   };
 
   const stopTelegramProvider = async () => {
@@ -2437,6 +2443,10 @@ export async function startGatewayServer(
             };
           }
           await writeConfigFile(validated.config);
+          await stopTelegramProvider();
+          startTelegramProvider().catch((err) => {
+            logTelegram.error(`config update telegram spawn failed: ${formatError(err)}`);
+          });
           return {
             ok: true,
             payloadJSON: JSON.stringify({
@@ -2534,9 +2544,9 @@ export async function startGatewayServer(
           const existing = store[key];
           const next: SessionEntry = existing
             ? {
-                ...existing,
-                updatedAt: Math.max(existing.updatedAt ?? 0, now),
-              }
+              ...existing,
+              updatedAt: Math.max(existing.updatedAt ?? 0, now),
+            }
             : { sessionId: randomUUID(), updatedAt: now };
 
           if ("thinkingLevel" in p) {
@@ -2985,10 +2995,10 @@ export async function startGatewayServer(
                   ? a.content
                   : ArrayBuffer.isView(a?.content)
                     ? Buffer.from(
-                        a.content.buffer,
-                        a.content.byteOffset,
-                        a.content.byteLength,
-                      ).toString("base64")
+                      a.content.buffer,
+                      a.content.byteOffset,
+                      a.content.byteLength,
+                    ).toString("base64")
                     : undefined,
             })) ?? [];
 
@@ -3538,7 +3548,7 @@ export async function startGatewayServer(
           const now = Date.now();
           const last = chatDeltaSentAt.get(clientRunId) ?? 0;
           // Throttle UI delta events so slow clients don't accumulate unbounded buffers.
-          if (now - last >= 150) {
+          if (now - last >= 30) {
             chatDeltaSentAt.set(clientRunId, now);
             const payload = {
               ...base,
@@ -3574,10 +3584,10 @@ export async function startGatewayServer(
               state: "final",
               message: text
                 ? {
-                    role: "assistant",
-                    content: [{ type: "text", text }],
-                    timestamp: Date.now(),
-                  }
+                  role: "assistant",
+                  content: [{ type: "text", text }],
+                  timestamp: Date.now(),
+                }
                 : undefined,
             };
             broadcast("chat", payload);
@@ -3606,7 +3616,7 @@ export async function startGatewayServer(
           chatRunBuffers.set(clientRunId, evt.data.text);
           const now = Date.now();
           const last = chatDeltaSentAt.get(clientRunId) ?? 0;
-          if (now - last >= 150) {
+          if (now - last >= 30) {
             chatDeltaSentAt.set(clientRunId, now);
             const payload = {
               ...base,
@@ -3635,10 +3645,10 @@ export async function startGatewayServer(
               state: "final",
               message: text
                 ? {
-                    role: "assistant",
-                    content: [{ type: "text", text }],
-                    timestamp: Date.now(),
-                  }
+                  role: "assistant",
+                  content: [{ type: "text", text }],
+                  timestamp: Date.now(),
+                }
                 : undefined,
             };
             broadcast("chat", payload);
@@ -4182,7 +4192,7 @@ export async function startGatewayServer(
               active.controller.abort();
               chatAbortControllers.delete(runId);
               chatRunBuffers.delete(runId);
-    
+
               chatDeltaSentAt.delete(runId);
               removeChatRun(active.sessionId, runId, sessionKey);
 
@@ -4255,10 +4265,10 @@ export async function startGatewayServer(
                       ? a.content
                       : ArrayBuffer.isView(a?.content)
                         ? Buffer.from(
-                            a.content.buffer,
-                            a.content.byteOffset,
-                            a.content.byteLength,
-                          ).toString("base64")
+                          a.content.buffer,
+                          a.content.byteOffset,
+                          a.content.byteLength,
+                        ).toString("base64")
                         : undefined,
                 })) ?? [];
               let messageWithAttachments = p.message;
@@ -4664,6 +4674,10 @@ export async function startGatewayServer(
                 break;
               }
               await writeConfigFile(validated.config);
+              await stopTelegramProvider();
+              startTelegramProvider().catch((err) => {
+                logTelegram.error(`config update telegram spawn failed: ${formatError(err)}`);
+              });
               respond(
                 true,
                 {
@@ -4888,9 +4902,9 @@ export async function startGatewayServer(
               const existing = store[key];
               const next: SessionEntry = existing
                 ? {
-                    ...existing,
-                    updatedAt: Math.max(existing.updatedAt ?? 0, now),
-                  }
+                  ...existing,
+                  updatedAt: Math.max(existing.updatedAt ?? 0, now),
+                }
                 : { sessionId: randomUUID(), updatedAt: now };
 
               if ("thinkingLevel" in p) {
@@ -5225,14 +5239,14 @@ export async function startGatewayServer(
                   : undefined;
               const lastInputSeconds =
                 typeof params.lastInputSeconds === "number" &&
-                Number.isFinite(params.lastInputSeconds)
+                  Number.isFinite(params.lastInputSeconds)
                   ? params.lastInputSeconds
                   : undefined;
               const reason =
                 typeof params.reason === "string" ? params.reason : undefined;
               const tags =
                 Array.isArray(params.tags) &&
-                params.tags.every((t) => typeof t === "string")
+                  params.tags.every((t) => typeof t === "string")
                   ? (params.tags as string[])
                   : undefined;
               const presenceUpdate = updateSystemPresence({
@@ -5801,12 +5815,12 @@ export async function startGatewayServer(
                 const payload =
                   typeof res.payloadJSON === "string" && res.payloadJSON.trim()
                     ? (() => {
-                        try {
-                          return JSON.parse(res.payloadJSON) as unknown;
-                        } catch {
-                          return { payloadJSON: res.payloadJSON };
-                        }
-                      })()
+                      try {
+                        return JSON.parse(res.payloadJSON) as unknown;
+                      } catch {
+                        return { payloadJSON: res.payloadJSON };
+                      }
+                    })()
                     : undefined;
                 respond(
                   true,
@@ -5933,7 +5947,7 @@ export async function startGatewayServer(
 
               const requestedSessionKey =
                 typeof params.sessionKey === "string" &&
-                params.sessionKey.trim()
+                  params.sessionKey.trim()
                   ? params.sessionKey.trim()
                   : undefined;
               let resolvedSessionId = params.sessionId?.trim() || undefined;
@@ -6218,7 +6232,7 @@ export async function startGatewayServer(
       const reason = reasonRaw || "gateway stopping";
       const restartExpectedMs =
         typeof opts?.restartExpectedMs === "number" &&
-        Number.isFinite(opts.restartExpectedMs)
+          Number.isFinite(opts.restartExpectedMs)
           ? Math.max(0, Math.floor(opts.restartExpectedMs))
           : null;
       if (bonjourStop) {
@@ -6274,7 +6288,7 @@ export async function startGatewayServer(
       }
       clients.clear();
       if (stopBrowserControlServerIfStarted) {
-        await stopBrowserControlServerIfStarted().catch(() => {});
+        await stopBrowserControlServerIfStarted().catch(() => { });
       }
       await Promise.allSettled(
         [telegramTask].filter(

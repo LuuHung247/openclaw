@@ -464,11 +464,12 @@ function chatPage() {
                 // skip thinking blocks — don't show in history
               });
 
-              var text = self.sanitizeToolText(textParts.join('\n'));
+              var text = self.sanitizeToolText(role === 'user' ? stripEnvelopePrefix(textParts.join('\n')) : textParts.join('\n'));
               parsed.push({ id: ++msgId, role: role, text: text, meta: '', tools: tools });
             } else {
               // Plain string content
-              var text2 = self.sanitizeToolText(extractContentText(content));
+              var rawText2 = extractContentText(content);
+              var text2 = self.sanitizeToolText(role === 'user' ? stripEnvelopePrefix(rawText2) : rawText2);
               var tools2 = (m.tools || []).map(function(t, idx2) {
                 return { id: (t.name || 'tool') + '-hist-' + idx2, name: t.name || 'unknown', running: false, expanded: false, input: t.input || '', result: t.result || '', is_error: !!t.is_error };
               });
@@ -1183,6 +1184,17 @@ function chatPage() {
     renderMarkdown: renderMarkdown,
     escapeHtml: escapeHtml
   };
+}
+
+// Strip agent envelope prefix from Telegram/surface messages before display.
+// Format: "[Surface Sender id:NNNNN TIMESTAMP] actual message\n[message_id: N]"
+function stripEnvelopePrefix(text) {
+  if (!text || typeof text !== 'string') return text;
+  // Strip leading [...] header (envelope)
+  var stripped = text.replace(/^\[[^\]]*\]\s*/, '');
+  // Strip trailing [message_id: N] suffix (may be on its own line)
+  stripped = stripped.replace(/\n?\[message_id:\s*\d+\]\s*$/, '');
+  return stripped.trim() || text;
 }
 
 // Extract plain text from openclaw content block format:
