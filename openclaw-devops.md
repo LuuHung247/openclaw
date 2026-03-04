@@ -544,3 +544,97 @@ chat event {
 - **Duplicate vẫn có thể xảy ra** nếu 2 `final` broadcasts có `seq = 0` (fallback khi seq không có) — cần monitor thêm
 - **`0 in / 0 out`** trong message meta — `chat.send` không trả về token count; cần lấy từ `agent` event usage nếu muốn hiển thị đúng
 - **History load**: `loadSession` dùng `chat.history` RPC, format message từ Pi runtime transcript (JSONL) — cần verify khi có nhiều tool calls
+
+---
+
+## 10. Chat UI & Telegram Channel Config Fix (Session 5)
+
+> **Ngày:** 2026-03-03 → 2026-03-04
+> **Trạng thái:** ✅ Fixed & committed (`35109ee6a` trên branch `osp-devop-custome`)
+
+### Bug #9 — Message role case-sensitive → user message hiển thị sai bên (MEDIUM)
+
+**File:** `ui/js/pages/chat.js` dòng 425
+**Ảnh hưởng:** Sau khi reload trang, messages của user hiển thị bên trái (như model) thay vì bên phải
+**Root cause:** So sánh `m.role === 'User'` là case-sensitive, nhưng gateway trả về `'user'` lowercase
+
+**Fix:**
+```js
+// Trước (broken)
+var role = m.role === 'User' ? 'user' : (m.role === 'System' ? 'system' : 'agent');
+
+// Sau (fixed)
+var roleStr = (m.role || '').toLowerCase();
+var role = roleStr === 'user' ? 'user' : (roleStr === 'system' ? 'system' : 'agent');
+```
+
+---
+
+### Bug #10 — Telegram channel form không hiển thị ô nhập Bot Token (HIGH)
+
+**File:** `ui/js/api.js` — `getChannels()` function
+**Ảnh hưởng:** Click "Edit Config" trên Telegram channel → form trống, không có ô nhập token
+**Root cause:** Field được khai báo `type: 'password'` nhưng HTML template trong `channels.js` chỉ render khi `f.type === 'secret'`
+
+```html
+<!-- channels.js chỉ handle type='secret', 'text', 'number', 'list' -->
+<template x-if="f.type === 'secret'">
+  <input type="password" ...>
+</template>
+```
+
+**Fix:** Đổi `type: 'password'` → `type: 'secret'` trong khai báo field của Telegram channel trong `api.js`
+
+---
+
+### Bug #11 — Đổi token qua Web UI không restart Telegram bot ngay lập tức (HIGH)
+
+**File:** `src/gateway/server.ts` — handler `config.set`
+**Ảnh hưởng:** Lưu token mới qua Web UI → file config được cập nhật nhưng bot Telegram vẫn chạy với token cũ
+**Root cause:** `config.set` chỉ ghi file, không trigger restart Telegram provider đang chạy trong bộ nhớ
+
+**Fix:** Thêm stop/start Telegram provider sau khi lưu config (cả 2 handler: IPC bridge và WebSocket):
+```typescript
+await writeConfigFile(validated.config);
+await stopTelegramProvider();           // Tắt bot cũ
+startTelegramProvider().catch((err) => { // Bật lại với token mới
+  logTelegram.error(`config update telegram spawn failed: ${formatError(err)}`);
+});
+```
+
+---
+
+### Session naming — Tại sao Telegram session tên là `main`?
+
+Theo thiết kế của clawdis (`src/telegram/bot.ts`):
+- Mọi tin nhắn DM từ Telegram → được gán vào session key `mainKey` (mặc định: `"main"`)
+- Session `main` được dùng chung cho: Telegram DM, heartbeat, cron jobs
+- Session `webui` là session riêng cho Web UI chat (isolated)
+
+**Đổi tên Telegram session** (nếu muốn dùng tên khác):
+```json
+// ~/.clawdis/clawdis.json
+{
+  "session": {
+    "mainKey": "telegram"
+  }
+}
+```
+Restart gateway → Telegram DM sẽ dùng session `telegram` thay vì `main`.
+
+> ⚠️ **Lưu ý:** Thay đổi `mainKey` cũng ảnh hưởng đến heartbeat và cron. Nếu chỉ muốn đổi tên hiển thị trong Web UI mà không đổi session logic, có thể sửa mapping trong `getAgents()` của `api.js`.
+
+---
+
+### Cách restart gateway (không có lệnh built-in)
+
+```bash
+# Tìm và kill process đang chiếm cổng 18789
+lsof -ti :18789 | xargs kill -9
+
+# Bật lại
+npx tsx src/index.ts gateway-daemon --port 18789
+```
+
+> `pnpm stop` / `pnpm restart` không tồn tại trong `package.json`. Cách chính thống là `Ctrl+C`.
+

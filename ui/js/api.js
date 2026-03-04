@@ -498,11 +498,12 @@ var OpenFangAPI = (function() {
   // Gateway sessions.list returns: { sessions: [{key, kind, updatedAt, sessionId, totalTokens, model?, contextTokens?, percentUsed?, abortedLastRun}] }
   function _sessionDisplayName(key, lastChannel) {
     if (key === 'webui') return 'WebUI Chat';
-    if (key === 'main') return lastChannel === 'telegram' ? 'Telegram' : 'Main';
+    if (key === 'telegram' || key === 'main') return 'Telegram';
     return key;
   }
   function _sessionChannel(key, lastChannel) {
     if (key === 'webui') return 'webui';
+    if (key === 'telegram' || key === 'main') return 'telegram';
     return lastChannel || 'telegram';
   }
 
@@ -546,7 +547,7 @@ var OpenFangAPI = (function() {
       return mapped;
     }).catch(function() {
       return [
-        { id: 'main', name: 'Telegram', channel: 'telegram', state: 'Idle', status: 'idle', model_provider: 'zai', model_name: '', provider: 'zai', identity: {} },
+        { id: 'telegram', name: 'Telegram', channel: 'telegram', state: 'Idle', status: 'idle', model_provider: 'zai', model_name: '', provider: 'zai', identity: {} },
         { id: 'webui', name: 'WebUI Chat', channel: 'webui', state: 'Idle', status: 'idle', model_provider: '', model_name: '', provider: '', identity: {} }
       ];
     });
