@@ -90,7 +90,7 @@ function skillsPage() {
             runtime: s.runtime || 'unknown',
             tools_count: s.tools_count || 0,
             tags: s.tags || [],
-            enabled: s.enabled !== false,
+            enabled: true, // toggle disabled: skill visibility control planned later
             source: s.source || { type: 'local' },
             has_prompt_context: !!s.has_prompt_context
           };
@@ -227,17 +227,8 @@ function skillsPage() {
       this.installingSlug = null;
     },
 
-    // Toggle enable/disable skill
-    async toggleSkill(skill) {
-      var newState = !skill.enabled;
-      skill.enabled = newState; // optimistic update
-      try {
-        await OpenFangAPI.post('/api/skills/toggle', { name: skill.slug || skill.name, enabled: newState });
-      } catch(e) {
-        skill.enabled = !newState; // revert on failure
-        OpenFangToast.error('Failed to ' + (newState ? 'enable' : 'disable') + ' skill: ' + e.message);
-      }
-    },
+    // toggle disabled: skill visibility control planned later
+    // async toggleSkill(skill) { ... }
 
     // Uninstall (bundled skills → disable; user skills → delete)
     uninstallSkill: function(skill) {
