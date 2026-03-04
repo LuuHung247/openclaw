@@ -1028,65 +1028,10 @@ var OpenFangAPI = (function() {
   }
 
   // usage — from in-memory accumulator
-  function getUsageSummary() {
-    var totalIn = 0, totalOut = 0, totalCost = 0, calls = 0, toolCalls = 0;
-    Object.values(_usageAccumulator.byModel).forEach(function(m) {
-      totalIn += m.total_input_tokens;
-      totalOut += m.total_output_tokens;
-      totalCost += m.total_cost_usd;
-      calls += m.call_count;
-    });
-    Object.values(_usageAccumulator.bySession).forEach(function(s) {
-      toolCalls += s.tool_calls;
-    });
-    return Promise.resolve({
-      total_input_tokens: totalIn,
-      total_output_tokens: totalOut,
-      total_cost_usd: totalCost,
-      call_count: calls,
-      total_tool_calls: toolCalls
-    });
-  }
-
-  function getUsageByAgent() {
-    var agents = [];
-    Object.keys(_usageAccumulator.bySession).forEach(function(key) {
-      var s = _usageAccumulator.bySession[key];
-      agents.push({
-        agent_id: key,
-        agent_name: key,
-        total_tokens: s.tokens_in + s.tokens_out,
-        tool_calls: s.tool_calls,
-        cost_usd: s.cost_usd,
-        model: s.model || ''
-      });
-    });
-    return Promise.resolve({ agents: agents });
-  }
-
-  function getUsageByModel() {
-    var models = [];
-    Object.keys(_usageAccumulator.byModel).forEach(function(id) {
-      var m = _usageAccumulator.byModel[id];
-      models.push(Object.assign({ model: id }, m));
-    });
-    return Promise.resolve({ models: models });
-  }
-
-  function getUsageDaily() {
-    var days = [];
-    Object.keys(_usageAccumulator.dailyCosts).sort().forEach(function(date) {
-      var d = _usageAccumulator.dailyCosts[date];
-      days.push({ date: date, cost_usd: d.cost_usd, tokens: d.tokens, calls: d.calls });
-    });
-    var today = new Date().toISOString().slice(0, 10);
-    var todayCost = _usageAccumulator.dailyCosts[today] ? _usageAccumulator.dailyCosts[today].cost_usd : 0;
-    return Promise.resolve({
-      days: days,
-      today_cost_usd: todayCost,
-      first_event_date: _usageAccumulator.firstEventDate
-    });
-  }
+  function getUsageSummary() { return request('usage.summary', {}); }
+  function getUsageByAgent() { return request('usage.by-agent', {}); }
+  function getUsageByModel() { return request('usage.by-model', {}); }
+  function getUsageDaily()   { return request('usage.daily', {}); }
 
   // audit log — from in-memory log
   function getAuditRecent(n) {

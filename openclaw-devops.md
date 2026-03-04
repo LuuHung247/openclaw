@@ -690,4 +690,131 @@ await OpenFangAPI.post('/api/skills/uninstall', { name: name });
 if (path === '/api/skills/toggle') return request('skills.update', { skillKey: body.name, enabled: body.enabled });
 ```
 
+---
 
+## 12. Session 7 — Reset, Token Tracking, Skills Toggle (2026-03-04)
+
+### Fresh start / Reset config
+
+Để test onboarding flow từ đầu:
+```bash
+systemctl --user stop clawdis-gateway.service
+rm -rf ~/.clawdis
+systemctl --user start clawdis-gateway.service
+```
+Gateway sẽ tạo `~/.clawdis/` mới khi khởi động lần đầu.
+
+### Skills toggle disabled (tạm thời)
+
+Toggle enable/disable skill đã bị **comment lại** để đơn giản hóa — agent sẽ thấy toàn bộ skill đang cài:
+- `ui/index_body.html`: toggle button bị comment
+- `ui/js/pages/skills.js`: `toggleSkill()` bị comment, `enabled` luôn `true`
+
+Sẽ implement lại khi có use case cụ thể (vd: per-session skill filtering).
+
+### Token tracking & cost display
+
+**Root cause** (tại sao `0 in / 0 out | $0.0000` trước kia):
+- `agent.ts` ghi `inputTokens/outputTokens` vào `sessionStore` **SAU** khi đã emit `job.done` event
+- Gateway nhận `job.done` → gửi `state: "final"` cho WebUI không có usage data
+- UI đọc `data.input_tokens` từ payload → luôn 0
+
+**Fix** (3 file):
+
+1. **`src/agents/usage.ts`** — thêm `estimateCostUsd(model, usage, configCost?)`:
+   - Ưu tiên `configCost` từ model config (có `cost.input`, `cost.output` per million)
+   - Fallback về name-based lookup (port từ openfang `estimate_cost_rates`)
+   - GLM-4.7: `$1.50/$5.00` per M, GLM-4.7-flash: `$0.10/$0.10` per M
+
+2. **`src/commands/agent.ts`** — tính cost rồi thêm vào `job.done` event:
+```typescript
+const costUsd = doneUsage ? estimateCostUsd(doneModel, doneUsage) : undefined;
+emitAgentEvent({
+  stream: "job",
+  data: {
+    state: "done",
+    // ...
+    input_tokens: doneUsage?.input,
+    output_tokens: doneUsage?.output,
+    cost_usd: costUsd,
+  },
+});
+```
+
+3. **`src/gateway/server.ts`** — forward vào `state: "final"` payload (cả 2 code paths):
+```typescript
+const payload = {
+  ...base,
+  state: "final",
+  // ...
+  input_tokens: evt.data?.input_tokens,
+  output_tokens: evt.data?.output_tokens,
+  cost_usd: evt.data?.cost_usd,
+};
+```
+
+UI (`chat.js`) đã có sẵn code đọc và hiển thị `data.input_tokens`, `data.output_tokens`, `data.cost_usd` — không cần sửa UI.
+
+**Tham khảo**: Openfang `metering.rs` — `estimate_cost_rates()` function với pricing table đầy đủ cho 30+ model families.
+
+---
+
+## 13. Session 8 — Analytics Implementation (2026-03-04)
+
+### Analytics hiện tại — JSONL approach (tạm thời)
+
+**File log**: `~/.clawdis/usage-log.jsonl` — mỗi agent run append 1 line JSON.
+
+**Schema mỗi record:**
+```json
+{
+  "ts": "2026-03-04T16:38:00.000Z",
+  "date": "2026-03-04",
+  "sessionKey": "webui",
+  "model": "deepseek-chat",
+  "input_tokens": 9800,
+  "output_tokens": 78,
+  "cost_usd": 0.0027,
+  "tool_calls": 0,
+  "duration_ms": 3200
+}
+```
+
+**Flow:**
+1. `agent.ts` tính cost và gắn `input_tokens/output_tokens/cost_usd` vào `job.done` event
+2. `server.ts` nhận `job.done` → `appendUsageEvent()` → append vào JSONL
+3. 4 RPC handlers đọc JSONL và aggregate on-the-fly:
+   - `usage.summary` → tổng tokens, cost, calls
+   - `usage.by-model` → group by model, sort by cost DESC
+   - `usage.by-agent` → group by sessionKey
+   - `usage.daily` → group by date, time series
+4. `api.js` — thay in-memory accumulator bằng RPC calls thật → data persist qua reload/restart
+
+**Files đã sửa:** `src/gateway/server.ts`, `ui/js/api.js`
+
+### TODO — Upgrade lên SQLite (planned)
+
+Tham khảo openfang `crates/openfang-memory/src/`:
+- `migration.rs` — schema: `usage_events` table với index trên `(agent_id, timestamp)` và `timestamp`
+- `usage.rs` — `UsageStore` với các query: `query_summary`, `query_by_model`, `query_daily_breakdown`, `query_hourly`, `query_monthly`
+- `metering.rs` — `MeteringEngine` với quota enforcement hourly/daily/monthly
+
+**SQLite schema cần implement:**
+```sql
+CREATE TABLE usage_events (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cost_usd REAL NOT NULL,
+    tool_calls INTEGER NOT NULL
+);
+CREATE INDEX idx_usage_agent_time ON usage_events(agent_id, timestamp);
+CREATE INDEX idx_usage_timestamp ON usage_events(timestamp);
+```
+
+**Library để dùng**: `better-sqlite3` (sync, fast, dùng được trong Node.js gateway).
+
+**Lý do chưa làm**: JSONL đủ dùng cho volume nhỏ, không cần thêm dependency ngay. Upgrade khi cần query phức tạp (time range filter, per-hour aggregation, quota enforcement).

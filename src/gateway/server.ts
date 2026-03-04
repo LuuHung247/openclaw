@@ -452,6 +452,41 @@ type SessionsPatchResult = {
   entry: SessionEntry;
 };
 
+// ── Usage log (JSONL, one record per agent run) ─────────────────────────────
+const USAGE_LOG_PATH = path.join(CONFIG_DIR, "usage-log.jsonl");
+
+type UsageLogEntry = {
+  ts: string;       // ISO date string
+  date: string;     // YYYY-MM-DD
+  sessionKey: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  tool_calls: number;
+  duration_ms?: number;
+};
+
+function appendUsageEvent(entry: UsageLogEntry): void {
+  try {
+    fs.appendFileSync(USAGE_LOG_PATH, JSON.stringify(entry) + "\n", "utf-8");
+  } catch {
+    // non-fatal — analytics log failure should not break normal operation
+  }
+}
+
+function readUsageLog(): UsageLogEntry[] {
+  try {
+    if (!fs.existsSync(USAGE_LOG_PATH)) return [];
+    const lines = fs.readFileSync(USAGE_LOG_PATH, "utf-8").split("\n").filter(Boolean);
+    return lines.map((l) => {
+      try { return JSON.parse(l) as UsageLogEntry; } catch { return null; }
+    }).filter(Boolean) as UsageLogEntry[];
+  } catch {
+    return [];
+  }
+}
+
 const METHODS = [
   "health",
   "providers.status",
@@ -500,6 +535,10 @@ const METHODS = [
   "chat.history",
   "chat.abort",
   "chat.send",
+  "usage.summary",
+  "usage.by-model",
+  "usage.by-agent",
+  "usage.daily",
 ];
 
 const EVENTS = [
@@ -3591,6 +3630,9 @@ export async function startGatewayServer(
                   timestamp: Date.now(),
                 }
                 : undefined,
+              input_tokens: typeof evt.data?.input_tokens === "number" ? evt.data.input_tokens : undefined,
+              output_tokens: typeof evt.data?.output_tokens === "number" ? evt.data.output_tokens : undefined,
+              cost_usd: typeof evt.data?.cost_usd === "number" ? evt.data.cost_usd : undefined,
             };
             broadcast("chat", payload);
             bridgeSendToSession(finishedSessionKey, "chat", payload);
@@ -3652,6 +3694,9 @@ export async function startGatewayServer(
                   timestamp: Date.now(),
                 }
                 : undefined,
+              input_tokens: typeof evt.data?.input_tokens === "number" ? evt.data.input_tokens : undefined,
+              output_tokens: typeof evt.data?.output_tokens === "number" ? evt.data.output_tokens : undefined,
+              cost_usd: typeof evt.data?.cost_usd === "number" ? evt.data.cost_usd : undefined,
             };
             broadcast("chat", payload);
             bridgeSendToSession(sessionKey, "chat", payload);
@@ -3667,6 +3712,34 @@ export async function startGatewayServer(
             bridgeSendToSession(sessionKey, "chat", payload);
           }
         }
+      }
+    }
+
+    if (jobState === "done") {
+      // Persist usage record for analytics
+      const inTok = typeof evt.data?.input_tokens === "number" ? evt.data.input_tokens : 0;
+      const outTok = typeof evt.data?.output_tokens === "number" ? evt.data.output_tokens : 0;
+      const costUsd = typeof evt.data?.cost_usd === "number" ? evt.data.cost_usd : 0;
+      if (inTok > 0 || outTok > 0) {
+        const now = new Date();
+        const resolvedSessionKey =
+          peekChatRun(evt.runId)?.sessionKey ??
+          resolveSessionKeyForRun(evt.runId) ??
+          "unknown";
+        const modelUsed =
+          (loadSessionStore(resolveStorePath(loadConfig().session?.store))[resolvedSessionKey]?.model) ??
+          "unknown";
+        appendUsageEvent({
+          ts: now.toISOString(),
+          date: now.toISOString().slice(0, 10),
+          sessionKey: resolvedSessionKey,
+          model: modelUsed,
+          input_tokens: inTok,
+          output_tokens: outTok,
+          cost_usd: costUsd,
+          tool_calls: 0,
+          duration_ms: typeof evt.data?.durationMs === "number" ? evt.data.durationMs : undefined,
+        });
       }
     }
 
@@ -4950,6 +5023,75 @@ export async function startGatewayServer(
               }
               break;
             }
+
+            // ── Usage analytics ────────────────────────────────────────────
+            case "usage.summary": {
+              const log = readUsageLog();
+              let totalIn = 0, totalOut = 0, totalCost = 0, totalTools = 0;
+              for (const e of log) {
+                totalIn += e.input_tokens;
+                totalOut += e.output_tokens;
+                totalCost += e.cost_usd;
+                totalTools += e.tool_calls;
+              }
+              respond(true, {
+                total_input_tokens: totalIn,
+                total_output_tokens: totalOut,
+                total_cost_usd: totalCost,
+                call_count: log.length,
+                total_tool_calls: totalTools,
+              }, undefined);
+              break;
+            }
+            case "usage.by-model": {
+              const log = readUsageLog();
+              const byModel: Record<string, { total_input_tokens: number; total_output_tokens: number; total_cost_usd: number; call_count: number }> = {};
+              for (const e of log) {
+                if (!byModel[e.model]) byModel[e.model] = { total_input_tokens: 0, total_output_tokens: 0, total_cost_usd: 0, call_count: 0 };
+                byModel[e.model].total_input_tokens += e.input_tokens;
+                byModel[e.model].total_output_tokens += e.output_tokens;
+                byModel[e.model].total_cost_usd += e.cost_usd;
+                byModel[e.model].call_count += 1;
+              }
+              const models = Object.entries(byModel)
+                .map(([model, stats]) => ({ model, ...stats }))
+                .sort((a, b) => b.total_cost_usd - a.total_cost_usd);
+              respond(true, { models }, undefined);
+              break;
+            }
+            case "usage.by-agent": {
+              const log = readUsageLog();
+              const byAgent: Record<string, { total_tokens: number; cost_usd: number; tool_calls: number; model: string; call_count: number }> = {};
+              for (const e of log) {
+                if (!byAgent[e.sessionKey]) byAgent[e.sessionKey] = { total_tokens: 0, cost_usd: 0, tool_calls: 0, model: e.model, call_count: 0 };
+                byAgent[e.sessionKey].total_tokens += e.input_tokens + e.output_tokens;
+                byAgent[e.sessionKey].cost_usd += e.cost_usd;
+                byAgent[e.sessionKey].tool_calls += e.tool_calls;
+                byAgent[e.sessionKey].call_count += 1;
+                if (e.model && e.model !== "unknown") byAgent[e.sessionKey].model = e.model;
+              }
+              const agents = Object.entries(byAgent).map(([agent_id, stats]) => ({ agent_id, agent_name: agent_id, ...stats }));
+              respond(true, { agents }, undefined);
+              break;
+            }
+            case "usage.daily": {
+              const log = readUsageLog();
+              const byDay: Record<string, { cost_usd: number; tokens: number; calls: number }> = {};
+              for (const e of log) {
+                if (!byDay[e.date]) byDay[e.date] = { cost_usd: 0, tokens: 0, calls: 0 };
+                byDay[e.date].cost_usd += e.cost_usd;
+                byDay[e.date].tokens += e.input_tokens + e.output_tokens;
+                byDay[e.date].calls += 1;
+              }
+              const today = new Date().toISOString().slice(0, 10);
+              const days = Object.entries(byDay)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([date, stats]) => ({ date, ...stats }));
+              const firstEventDate = days.length > 0 ? days[0].date : null;
+              respond(true, { days, today_cost_usd: byDay[today]?.cost_usd ?? 0, first_event_date: firstEventDate }, undefined);
+              break;
+            }
+
             case "sessions.list": {
               const params = (req.params ?? {}) as Record<string, unknown>;
               if (!validateSessionsListParams(params)) {

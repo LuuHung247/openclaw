@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { lookupContextTokens } from "../agents/context.js";
+import { estimateCostUsd } from "../agents/usage.js";
 import {
   DEFAULT_CONTEXT_TOKENS,
   DEFAULT_MODEL,
@@ -347,19 +348,29 @@ export async function agentCommand(
         });
       },
     });
-    emitAgentEvent({
-      runId: sessionId,
-      stream: "job",
-      data: {
-        state: "done",
-        startedAt,
-        endedAt: Date.now(),
-        to: opts.to ?? null,
-        sessionId,
-        durationMs: Date.now() - startedAt,
-        aborted: result.meta.aborted ?? false,
-      },
-    });
+    {
+      const doneUsage = result.meta.agentMeta?.usage;
+      const doneModel = result.meta.agentMeta?.model ?? model;
+      const costUsd = doneUsage
+        ? estimateCostUsd(doneModel, doneUsage)
+        : undefined;
+      emitAgentEvent({
+        runId: sessionId,
+        stream: "job",
+        data: {
+          state: "done",
+          startedAt,
+          endedAt: Date.now(),
+          to: opts.to ?? null,
+          sessionId,
+          durationMs: Date.now() - startedAt,
+          aborted: result.meta.aborted ?? false,
+          input_tokens: doneUsage?.input,
+          output_tokens: doneUsage?.output,
+          cost_usd: costUsd,
+        },
+      });
+    }
   } catch (err) {
     emitAgentEvent({
       runId: sessionId,
