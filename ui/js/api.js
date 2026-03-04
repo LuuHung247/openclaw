@@ -553,27 +553,36 @@ var OpenFangAPI = (function() {
     });
   }
 
+  // UUID pattern — sessions with UUID keys are internal ghost sessions created by reset
+  var _uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   function getSessions() {
     return request('sessions.list').then(function(p) {
       var sessions = (p && p.sessions) || [];
       var defaults = (p && p.defaults) || {};
       return {
-        sessions: sessions.map(function(s) {
-          var model = s.model || defaults.model || '';
-          return {
-            session_id: s.sessionId || s.key || 'main',
-            agent_id: s.key || s.sessionKey || 'main',
-            session_key: s.key || s.sessionKey || 'main',
-            model: model,
-            running: s.abortedLastRun === false ? false : false,
-            message_count: 0,
-            created_at: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
-            last_active: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
-            token_count: s.totalTokens || 0,
-            context_pct: s.percentUsed || 0,
-            context_tokens: s.contextTokens || defaults.contextTokens || 0
-          };
-        })
+        sessions: sessions
+          .filter(function(s) {
+            // Hide sessions whose key looks like a UUID (internal ghost sessions from reset)
+            var key = s.key || s.sessionKey || '';
+            return !_uuidRe.test(key);
+          })
+          .map(function(s) {
+            var model = s.model || defaults.model || '';
+            return {
+              session_id: s.sessionId || s.key || 'main',
+              agent_id: s.key || s.sessionKey || 'main',
+              session_key: s.key || s.sessionKey || 'main',
+              model: model,
+              running: s.abortedLastRun === false ? false : false,
+              message_count: 0,
+              created_at: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
+              last_active: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
+              token_count: s.totalTokens || 0,
+              context_pct: s.percentUsed || 0,
+              context_tokens: s.contextTokens || defaults.contextTokens || 0
+            };
+          })
       };
     }).catch(function() { return { sessions: [] }; });
   }
@@ -887,36 +896,60 @@ var OpenFangAPI = (function() {
   }
 
   function installSkill(slug) {
-    return request('skills.install', { name: slug });
+    var installId = 'install-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    return request('skills.install', { name: slug, installId: installId });
   }
 
-  function updateSkill(name) {
-    return request('skills.update', { name: name });
+  function updateSkill(name, patch) {
+    return request('skills.update', Object.assign({ skillKey: name }, patch || {}));
   }
 
-  // ClawHub proxy — fetch directly from ClawHub registry
-  var _clawhubBase = 'https://clawhub.openclaw.dev';
+  // ClawHub proxy — fetch directly from ClawHub registry (clawhub.ai/api/v1)
+  var _clawhubBase = 'https://clawhub.ai/api/v1';
+
+  function _normalizeClawhubSkill(s) {
+    return {
+      slug: s.slug || '',
+      name: s.displayName || s.name || s.slug || '',
+      description: s.summary || s.description || '',
+      version: (s.latestVersion && s.latestVersion.version) || (s.tags && s.tags.latest) || '',
+      downloads: (s.stats && s.stats.downloads) || 0,
+      stars: (s.stats && s.stats.stars) || 0,
+      author: s.author || (s.owner && s.owner.name) || '',
+      installed: !!s.installed,
+    };
+  }
 
   function clawhubSearch(q, limit) {
-    return fetch(_clawhubBase + '/api/search?q=' + encodeURIComponent(q) + '&limit=' + (limit || 20))
+    return fetch(_clawhubBase + '/search?q=' + encodeURIComponent(q) + '&limit=' + (limit || 20))
       .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var raw = d.results || d.items || [];
+        return { items: raw.map(_normalizeClawhubSkill), next_cursor: d.nextCursor || null };
+      })
       .catch(function() { return { items: [], error: 'ClawHub unreachable' }; });
   }
 
   function clawhubBrowse(sort, limit, cursor) {
-    var url = _clawhubBase + '/api/browse?sort=' + (sort || 'trending') + '&limit=' + (limit || 20);
+    var url = _clawhubBase + '/skills?sort=' + (sort || 'trending') + '&limit=' + (limit || 20);
     if (cursor) url += '&cursor=' + encodeURIComponent(cursor);
-    return fetch(url).then(function(r) { return r.json(); }).catch(function() { return { items: [], error: 'ClawHub unreachable' }; });
+    return fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        return { items: (d.items || []).map(_normalizeClawhubSkill), next_cursor: d.nextCursor || null };
+      })
+      .catch(function() { return { items: [], error: 'ClawHub unreachable' }; });
   }
 
   function clawhubSkillDetail(slug) {
-    return fetch(_clawhubBase + '/api/skills/' + encodeURIComponent(slug))
+    return fetch(_clawhubBase + '/skills/' + encodeURIComponent(slug))
       .then(function(r) { return r.json(); })
+      .then(function(d) { return Object.assign(_normalizeClawhubSkill(d), d); })
       .catch(function() { throw new Error('ClawHub unreachable'); });
   }
 
   function installFromClawHub(slug) {
-    return request('skills.install', { name: slug, source: 'clawhub' });
+    return request('skills.clawhub-install', { slug: slug });
   }
 
   // cron / scheduler
@@ -1436,8 +1469,9 @@ var OpenFangAPI = (function() {
     // skills
     if (path === '/api/clawhub/install')   return installFromClawHub(body.slug);
     if (path === '/api/skills/install')    return installSkill(body.name || body.slug);
-    if (path === '/api/skills/update')     return updateSkill(body.name);
-    if (path === '/api/skills/uninstall')  return request('skills.uninstall', { name: body.name });
+    if (path === '/api/skills/update')     return updateSkill(body.name, body.patch);
+    if (path === '/api/skills/uninstall')  return request('skills.uninstall', { skillKey: body.name });
+    if (path === '/api/skills/toggle')     return request('skills.update', { skillKey: body.name, enabled: body.enabled });
     if (path === '/api/skills/create')     return Promise.reject(new Error('Custom skill creation not supported'));
 
     // providers key

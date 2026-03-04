@@ -227,16 +227,36 @@ function skillsPage() {
       this.installingSlug = null;
     },
 
-    // Uninstall
-    uninstallSkill: function(name) {
+    // Toggle enable/disable skill
+    async toggleSkill(skill) {
+      var newState = !skill.enabled;
+      skill.enabled = newState; // optimistic update
+      try {
+        await OpenFangAPI.post('/api/skills/toggle', { name: skill.slug || skill.name, enabled: newState });
+      } catch(e) {
+        skill.enabled = !newState; // revert on failure
+        OpenFangToast.error('Failed to ' + (newState ? 'enable' : 'disable') + ' skill: ' + e.message);
+      }
+    },
+
+    // Uninstall (bundled skills → disable; user skills → delete)
+    uninstallSkill: function(skill) {
       var self = this;
-      OpenFangToast.confirm('Uninstall Skill', 'Uninstall skill "' + name + '"? This cannot be undone.', async function() {
+      var name = typeof skill === 'string' ? skill : (skill.slug || skill.name);
+      var isBundled = skill && skill.source && skill.source.type === 'bundled';
+      var confirmMsg = isBundled
+        ? 'Built-in skill "' + name + '" cannot be deleted. Disable it instead?'
+        : 'Uninstall skill "' + name + '"? This cannot be undone.';
+      OpenFangToast.confirm('Uninstall Skill', confirmMsg, async function() {
         try {
-          await OpenFangAPI.post('/api/skills/uninstall', { name: name });
-          OpenFangToast.success('Skill "' + name + '" uninstalled');
+          var result = await OpenFangAPI.post('/api/skills/uninstall', { name: name });
+          var msg = (result && result.action === 'disabled')
+            ? 'Built-in skill "' + name + '" disabled'
+            : 'Skill "' + name + '" uninstalled';
+          OpenFangToast.success(msg);
           await self.loadSkills();
         } catch(e) {
-          OpenFangToast.error('Failed to uninstall skill: ' + e.message);
+          OpenFangToast.error('Failed: ' + e.message);
         }
       });
     },

@@ -134,7 +134,7 @@ import { monitorTelegramProvider } from "../telegram/monitor.js";
 import { probeTelegram, type TelegramProbe } from "../telegram/probe.js";
 import { sendMessageTelegram } from "../telegram/send.js";
 import { resolveTelegramToken } from "../telegram/token.js";
-import { resolveUserPath } from "../utils.js";
+import { CONFIG_DIR, resolveUserPath } from "../utils.js";
 import {
   assertGatewayAuthConfigured,
   authorizeGatewayConnect,
@@ -463,6 +463,8 @@ const METHODS = [
   "skills.status",
   "skills.install",
   "skills.update",
+  "skills.uninstall",
+  "skills.clawhub-install",
   "voicewake.get",
   "voicewake.set",
   "sessions.list",
@@ -4842,6 +4844,110 @@ export async function startGatewayServer(
                 { ok: true, skillKey: p.skillKey, config: current },
                 undefined,
               );
+              break;
+            }
+            case "skills.uninstall": {
+              const params = (req.params ?? {}) as Record<string, unknown>;
+              if (typeof params.skillKey !== "string" || !params.skillKey.trim()) {
+                respond(
+                  false,
+                  undefined,
+                  errorShape(
+                    ErrorCodes.INVALID_REQUEST,
+                    "skills.uninstall requires skillKey parameter"
+                  ),
+                );
+                break;
+              }
+              const skillKey = params.skillKey.trim();
+              const cfg = loadConfig();
+              const workspaceDirRaw =
+                cfg.agent?.workspace ?? DEFAULT_AGENT_WORKSPACE_DIR;
+              const workspaceDir = resolveUserPath(workspaceDirRaw);
+
+              try {
+                // Find skill's baseDir via status report (covers all skill dirs)
+                const report = buildWorkspaceSkillStatus(workspaceDir, { config: cfg });
+                const skillEntry = report.skills.find(
+                  (s) => s.skillKey === skillKey || s.name === skillKey
+                );
+
+                if (!skillEntry) {
+                  respond(
+                    false,
+                    undefined,
+                    errorShape(ErrorCodes.UNAVAILABLE, `Skill "${skillKey}" not found`)
+                  );
+                  break;
+                }
+
+                // Bundled skills (source === "clawdis-bundled") cannot be deleted from disk.
+                // Disable them via config instead.
+                if (skillEntry.source === "clawdis-bundled") {
+                  const skills = cfg.skills ? { ...cfg.skills } : {};
+                  const entries = skills.entries ? { ...skills.entries } : {};
+                  entries[skillKey] = { ...entries[skillKey], enabled: false };
+                  skills.entries = entries;
+                  await writeConfigFile({ ...cfg, skills });
+                  respond(true, { ok: true, skillKey, action: "disabled" }, undefined);
+                  break;
+                }
+
+                // For user-installed skills: delete the directory
+                const skillPath = skillEntry.baseDir;
+                if (skillPath && fs.existsSync(skillPath)) {
+                  fs.rmSync(skillPath, { recursive: true, force: true });
+                }
+
+                // Remove from config entries
+                const skills = cfg.skills ? { ...cfg.skills } : {};
+                const entries = skills.entries ? { ...skills.entries } : {};
+                delete entries[skillKey];
+                skills.entries = entries;
+                await writeConfigFile({ ...cfg, skills });
+
+                respond(true, { ok: true, skillKey, action: "deleted" }, undefined);
+              } catch (err) {
+                respond(
+                  false,
+                  undefined,
+                  errorShape(
+                    ErrorCodes.UNAVAILABLE,
+                    `Failed to uninstall skill: ${formatError(err)}`
+                  ),
+                );
+              }
+              break;
+            }
+            case "skills.clawhub-install": {
+              const params = (req.params ?? {}) as Record<string, unknown>;
+              const slug = typeof params.slug === "string" ? params.slug.trim() : "";
+              if (!slug) {
+                respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "slug required"));
+                break;
+              }
+              try {
+                // Download SKILL.md from ClawHub
+                const skillMdUrl = `https://clawhub.ai/api/v1/skills/${encodeURIComponent(slug)}/file?path=SKILL.md`;
+                const res = await fetch(skillMdUrl);
+                if (!res.ok) {
+                  respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `ClawHub returned ${res.status}`));
+                  break;
+                }
+                const skillMd = await res.text();
+                if (!skillMd.trim()) {
+                  respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "Empty SKILL.md from ClawHub"));
+                  break;
+                }
+                // Save to ~/.clawdis/skills/<slug>/SKILL.md
+                const skillDir = path.join(CONFIG_DIR, "skills", slug);
+                fs.mkdirSync(skillDir, { recursive: true });
+                fs.writeFileSync(path.join(skillDir, "SKILL.md"), skillMd, "utf-8");
+                broadcast("skills.installed", { name: slug });
+                respond(true, { ok: true, name: slug }, undefined);
+              } catch (err) {
+                respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Install failed: ${formatError(err)}`));
+              }
               break;
             }
             case "sessions.list": {

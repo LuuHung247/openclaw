@@ -638,3 +638,56 @@ npx tsx src/index.ts gateway-daemon --port 18789
 
 > `pnpm stop` / `pnpm restart` không tồn tại trong `package.json`. Cách chính thống là `Ctrl+C`.
 
+---
+
+## 11. Skills Tab Fix (Session 6)
+
+> **Ngày:** 2026-03-04
+> **Trạng thái:** ✅ Fixed
+
+### Vấn đề
+
+Tab **Skills** trong Extensions có các lỗi sau:
+
+| # | Bug | Ảnh hưởng |
+|---|-----|-----------|
+| 1 | `getSkills()` có thể trả về list rỗng nếu `skills.status` fail | Tab "Installed" trống, không thấy skills nào |
+| 2 | `skills.install` gọi với `installId` thiếu (field bắt buộc của gateway) | Cài skill từ ClawHub → error "invalid params" |
+| 3 | `skills.update` mapping sai — gateway nhận `skillKey` không phải `name` | Nút Enable/Disable skill không hoạt động |
+| 4 | `skills.uninstall` không tồn tại trong gateway (chỉ có `skills.update`) | Uninstall → error |
+| 5 | ClawHub base URL `clawhub.openclaw.dev` có thể không tồn tại | Browse/Search ClawHub → fail silently |
+
+### Fixes
+
+**`ui/js/api.js`:**
+
+1. **`installSkill`** — thêm `installId` (UUID) bắt buộc:
+```js
+function installSkill(slug) {
+  return request('skills.install', {
+    name: slug,
+    installId: 'install-' + Date.now() + '-' + Math.random().toString(36).slice(2)
+  });
+}
+```
+
+2. **`updateSkill`** — đổi field name → skillKey và expose `enabled`:
+```js
+function updateSkill(name, patch) {
+  return request('skills.update', Object.assign({ skillKey: name }, patch || {}));
+}
+```
+
+3. **`uninstallSkill`** — gateway không có uninstall, dùng `skills.update { enabled: false }` thay thế:
+```js
+// skills.js: uninstallSkill → disable skill
+await OpenFangAPI.post('/api/skills/uninstall', { name: name });
+// → api.js maps to: request('skills.update', { skillKey: name, enabled: false })
+```
+
+4. **Toggle enable/disable** — expose endpoint `/api/skills/toggle`:
+```js
+if (path === '/api/skills/toggle') return request('skills.update', { skillKey: body.name, enabled: body.enabled });
+```
+
+

@@ -32,7 +32,15 @@ function sessionsPage() {
         sessions = sessions.map(function(s) {
           if (!s.session_id) s.session_id = s.session_key || s.agent_id;
           if (!s.agent_id) s.agent_id = s.session_key;
-          s.agent_name = s.agent_id || s.session_key || '';
+          var key = s.session_key || s.agent_id || '';
+          // Display name mapping
+          if (key === 'telegram' || key === 'main') {
+            s.agent_name = 'Telegram';
+          } else if (key === 'webui') {
+            s.agent_name = 'WebUI Chat';
+          } else {
+            s.agent_name = s.agent_id || s.session_key || '';
+          }
           return s;
         });
         this.sessions = sessions;
@@ -69,20 +77,18 @@ function sessionsPage() {
 
     deleteSession(session) {
       var self = this;
-      // Accept either a session object or a raw id string for backwards compat
       var sessionKey = (session && typeof session === 'object')
         ? (session.session_key || session.agent_id || session.session_id || session)
         : session;
-      OpenFangToast.confirm('Delete Session', 'This will permanently remove the session and its messages.', async function() {
-        try {
-          await OpenFangAPI.del('/api/sessions/' + sessionKey);
-          self.sessions = self.sessions.filter(function(s) {
-            return (s.session_key || s.agent_id || s.session_id) !== sessionKey;
-          });
-          OpenFangToast.success('Session deleted');
-        } catch(e) {
-          OpenFangToast.error('Failed to delete session: ' + e.message);
-        }
+      var displayName = (session && session.agent_name) ? session.agent_name : sessionKey;
+      if (!window.confirm('Clear history of "' + displayName + '"?\nAll messages will be deleted. The session will restart fresh on next use.')) return;
+      // sessions.delete properly archives the transcript (no ghost sessions)
+      // The session will be auto-recreated on next chat message
+      OpenFangAPI.del('/api/sessions/' + sessionKey).then(function() {
+        OpenFangToast.success('History of "' + displayName + '" cleared');
+        self.loadSessions();
+      }).catch(function(e) {
+        OpenFangToast.error('Failed to clear history: ' + (e && e.message || 'unknown error'));
       });
     },
 

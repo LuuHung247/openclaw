@@ -2790,7 +2790,7 @@
                           <span class="badge" :class="sourceBadge(skill.source).cls"
                             x-text="sourceBadge(skill.source).text" style="font-size:0.65rem"></span>
                         </div>
-                        <div class="toggle" :class="{ active: skill.enabled }" @click="skill.enabled = !skill.enabled">
+                        <div class="toggle" :class="{ active: skill.enabled }" @click="toggleSkill(skill)">
                         </div>
                       </div>
                       <div class="card-meta" x-text="skill.description"></div>
@@ -2800,7 +2800,7 @@
                           <span class="text-xs text-dim" x-show="skill.version" x-text="'v' + skill.version"></span>
                           <span class="text-xs text-dim" x-show="skill.has_prompt_context">(prompt context)</span>
                         </div>
-                        <button class="btn btn-danger btn-sm" @click="uninstallSkill(skill.name)">Uninstall</button>
+                        <button class="btn btn-danger btn-sm" @click="uninstallSkill(skill)">Uninstall</button>
                       </div>
                     </div>
                   </template>
