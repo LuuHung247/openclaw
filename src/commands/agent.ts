@@ -365,6 +365,7 @@ export async function agentCommand(
           sessionId,
           durationMs: Date.now() - startedAt,
           aborted: result.meta.aborted ?? false,
+          model: doneModel,
           input_tokens: doneUsage?.input,
           output_tokens: doneUsage?.output,
           cost_usd: costUsd,

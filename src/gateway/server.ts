@@ -3727,8 +3727,11 @@ export async function startGatewayServer(
           resolveSessionKeyForRun(evt.runId) ??
           "unknown";
         const modelUsed =
+          (typeof evt.data?.model === "string" && evt.data.model.trim()
+            ? evt.data.model.trim()
+            : undefined) ??
           (loadSessionStore(resolveStorePath(loadConfig().session?.store))[resolvedSessionKey]?.model) ??
-          "unknown";
+          (loadConfig().agent?.model ?? "unknown");
         appendUsageEvent({
           ts: now.toISOString(),
           date: now.toISOString().slice(0, 10),
