@@ -818,3 +818,129 @@ CREATE INDEX idx_usage_timestamp ON usage_events(timestamp);
 **Library để dùng**: `better-sqlite3` (sync, fast, dùng được trong Node.js gateway).
 
 **Lý do chưa làm**: JSONL đủ dùng cho volume nhỏ, không cần thêm dependency ngay. Upgrade khi cần query phức tạp (time range filter, per-hour aggregation, quota enforcement).
+
+---
+
+## 4. Memory & Token Optimization
+
+> **Thực hiện**: 2026-03-05
+> **Mục tiêu**: Giảm token consumption, cải thiện memory recall, không cần GPU.
+
+### 4.1 Context Window Analysis
+
+OpenClaw (clawdis fork) inject toàn bộ workspace files vào **mỗi** request qua `buildSystemPrompt()`:
+
+```typescript
+// pi-embedded-runner.ts
+const bootstrapFiles = await loadWorkspaceBootstrapFiles(resolvedWorkspace);
+const contextFiles = buildBootstrapContextFiles(bootstrapFiles);
+// → Inject toàn bộ: AGENTS.md + SOUL.md + TOOLS.md + IDENTITY.md + USER.md + BOOTSTRAP.md
+```
+
+**Lưu ý**: Skills KHÔNG bị dump full vào context. `formatSkillsForPrompt()` chỉ inject
+`name + description + filepath`. Agent tự dùng `read` tool khi cần → skills không phải bottleneck.
+
+### 4.2 Kết quả Token Reduction (2026-03-05)
+
+| File | Trước | Sau | Giảm |
+|------|------:|----:|-----:|
+| `~/clawd/AGENTS.md` | ~840 | ~177 | -79% |
+| `~/clawd/SOUL.md` | ~418 | ~144 | -66% |
+| `~/clawd/TOOLS.md` | ~214 | ~59 | -72% |
+| `~/clawd/IDENTITY.md` | ~104 | ~44 | -58% |
+| `~/clawd/USER.md` | ~120 | ~74 | -38% |
+| `~/clawd/BOOTSTRAP.md` | ~336 | ~72 | -79% |
+| `~/.clawdis/AGENTS.md` (new global) | 0 | ~179 | new |
+| **TOTAL** | **~2032** | **~749** | **-63%** |
+
+### 4.3 Config Changes — `~/.clawdis/clawdis.json`
+
+```json
+{
+  "agent": {
+    "model": "deepseek/deepseek-chat",
+    "workspace": "/home/hunglk/clawd",
+    "heartbeat": {
+      "model": "zai/glm-4.7-flash"
+    }
+  },
+  "session": {
+    "mainKey": "telegram",
+    "timeoutMs": 120000
+  },
+  "logging": {
+    "level": "info"
+  }
+}
+```
+
+Key changes:
+- `heartbeat.model` → `glm-4.7-flash` (free, cost=0) cho heartbeat thay vì deepseek-chat
+- `agent.workspace` → explicit path, tránh path resolution ambiguity
+- `session.timeoutMs: 120000` → 2 min timeout
+
+### 4.4 Optimization Roadmap
+
+| Priority | Step | Effort | Status |
+|:---:|------|--------|:---:|
+| 🔴 1 | Trim workspace .md files + global AGENTS.md | 30 min | ✅ DONE |
+| 🔴 2 | Config heartbeat model (cheap/free) | 5 min | ✅ DONE |
+| 🟡 3 | Dynamic Tool Loading — inject chỉ tools cần cho task | 3-4h | ⏳ TODO |
+| 🟡 4 | Mem0 self-hosted (ChromaDB + FastAPI) — auto fact extraction | 2-3h | ⏳ TODO |
+| 🔵 5 | SQLite analytics — thay usage-log.jsonl | 2h | ⏳ TODO |
+| 🔵 6 | Context pruning middleware — giữ N turns gần nhất | 2h | ⏳ TODO |
+| ⚪ 7 | Hybrid search (BM25 + vector) — QMD sidecar hoặc Orama | 4-8h | ⏳ TODO |
+| ⚪ 8 | LanceDB Pro — 7-layer retrieval pipeline | sau khi stable | ⏳ TODO |
+
+### 4.5 Source Code Findings
+
+**pi-coding-agent v0.31.1 ĐÃ CÓ**:
+- Compaction tự động khi context gần đầy (token-based, không phải TTL)
+- `selectedTools` API — có thể pass tool list tuỳ chỉnh vào `createAgentSession()`
+- `heartbeat.model` config supported trong `auto-reply/reply.ts` dòng 738
+
+**pi-coding-agent KHÔNG CÓ** (phải tự build):
+- `contextPruning`, `memoryFlush`, `memorySearch.hybrid`, `embeddingCache`
+- QMD / Mem0 plugin system (không có plugin architecture như upstream OpenClaw)
+
+**OpenFang reference** (cho future implementation):
+- `tool_policy.rs` → deny/allow glob pattern, depth-aware → model cho Dynamic Tool Loading
+- `store_llm_summary()` + `MemorySubstrate` → reference cho SQLite memory backend
+- `ContextBudget + truncate_tool_result_dynamic()` → reference cho context pruning
+- `ConsolidationEngine` (confidence decay) → reference cho memory TTL/decay
+
+### 4.6 Memory Architecture Reference (OpenFang)
+
+OpenFang `MemorySubstrate` = 5 layers:
+
+```
+MemorySubstrate
+├── SemanticStore   (SQLite + cosine similarity, optional embedding BLOB)
+├── KnowledgeStore  (entities + relations graph)
+├── SessionStore    (message history + LLM compaction → compacted_summary)
+├── StructuredStore (KV per-agent)
+└── ConsolidationEngine (confidence decay, periodic cleanup)
+```
+
+SQLite schema của `memories` table (từ `openfang-memory/src/migration.rs`):
+
+```sql
+CREATE TABLE memories (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'episodic',
+    confidence REAL NOT NULL DEFAULT 1.0,
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    accessed_at TEXT NOT NULL,
+    access_count INTEGER NOT NULL DEFAULT 0,
+    deleted INTEGER NOT NULL DEFAULT 0,
+    embedding BLOB  -- optional: f32 LE bytes, cosine similarity search
+);
+CREATE INDEX idx_memories_agent ON memories(agent_id, deleted, accessed_at);
+CREATE INDEX idx_memories_scope ON memories(scope, deleted);
+```
+
+Có thể port schema này vào OpenClaw dùng `better-sqlite3`.

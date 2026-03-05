@@ -129,13 +129,13 @@ function loadOAuthStorageAt(pathname: string): OAuthStorage | null {
 function hasAnthropicOAuth(storage: OAuthStorage): boolean {
   const entry = storage.anthropic as
     | {
-        refresh?: string;
-        refresh_token?: string;
-        refreshToken?: string;
-        access?: string;
-        access_token?: string;
-        accessToken?: string;
-      }
+      refresh?: string;
+      refresh_token?: string;
+      refreshToken?: string;
+      access?: string;
+      access_token?: string;
+      accessToken?: string;
+    }
     | undefined;
   if (!entry) return false;
   const refresh =
@@ -400,13 +400,13 @@ export async function runEmbeddedPiAgent(params: {
           });
         restoreSkillEnv = params.skillsSnapshot
           ? applySkillEnvOverridesFromSnapshot({
-              snapshot: params.skillsSnapshot,
-              config: params.config,
-            })
+            snapshot: params.skillsSnapshot,
+            config: params.config,
+          })
           : applySkillEnvOverrides({
-              skills: skillEntries ?? [],
-              config: params.config,
-            });
+            skills: skillEntries ?? [],
+            config: params.config,
+          });
 
         const bootstrapFiles =
           await loadWorkspaceBootstrapFiles(resolvedWorkspace);
@@ -414,6 +414,7 @@ export async function runEmbeddedPiAgent(params: {
         const promptSkills = resolvePromptSkills(skillsSnapshot, skillEntries);
         const tools = createClawdisCodingTools({
           bash: params.config?.agent?.bash,
+          disabledTools: params.config?.agent?.disabledTools,
         });
         const machineName = await getMachineDisplayName();
         const runtimeInfo = {
@@ -563,12 +564,12 @@ export async function runEmbeddedPiAgent(params: {
           model: lastAssistant?.model ?? model.id,
           usage: usage
             ? {
-                input: usage.input,
-                output: usage.output,
-                cacheRead: usage.cacheRead,
-                cacheWrite: usage.cacheWrite,
-                total: usage.totalTokens,
-              }
+              input: usage.input,
+              output: usage.output,
+              cacheRead: usage.cacheRead,
+              cacheWrite: usage.cacheWrite,
+              total: usage.totalTokens,
+            }
             : undefined,
         };
 

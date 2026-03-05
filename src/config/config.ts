@@ -572,6 +572,13 @@ export type ClawdisConfig = {
       /** How long to keep finished sessions in memory (ms). */
       cleanupMs?: number;
     };
+    /**
+     * Clawdis tools to exclude from every API call.
+     * Disabling unused tools saves ~200-800 tokens per tool per request.
+     * Core coding tools (read, bash, edit, write) cannot be disabled.
+     * Available: "clawdis_browser", "clawdis_canvas", "clawdis_nodes", "clawdis_cron", "clawdis_gateway"
+     */
+    disabledTools?: string[];
   };
   routing?: RoutingConfig;
   messages?: MessagesConfig;
@@ -938,6 +945,7 @@ const ClawdisSchema = z.object({
           cleanupMs: z.number().int().positive().optional(),
         })
         .optional(),
+      disabledTools: z.array(z.string()).optional(),
     })
     .optional(),
   routing: RoutingSchema,

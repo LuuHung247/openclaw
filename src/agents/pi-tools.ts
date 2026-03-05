@@ -185,8 +185,8 @@ function normalizeToolParameters(tool: AnyAgentTool): AnyAgentTool {
       ? baseRequired
       : objectVariants > 0
         ? Array.from(requiredCounts.entries())
-            .filter(([, count]) => count === objectVariants)
-            .map(([key]) => key)
+          .filter(([, count]) => count === objectVariants)
+          .map(([key]) => key)
         : undefined;
 
   return {
@@ -230,6 +230,7 @@ function createClawdisReadTool(base: AnyAgentTool): AnyAgentTool {
 
 export function createClawdisCodingTools(options?: {
   bash?: BashToolDefaults & ProcessToolDefaults;
+  disabledTools?: string[];
 }): AnyAgentTool[] {
   const bashToolName = "bash";
   const base = (codingTools as unknown as AnyAgentTool[]).flatMap((tool) => {
@@ -241,11 +242,23 @@ export function createClawdisCodingTools(options?: {
   const processTool = createProcessTool({
     cleanupMs: options?.bash?.cleanupMs,
   });
+
+  // Filter clawdis-specific tools based on config.
+  // Core coding tools (read, bash, edit, write) are always included.
+  // Clawdis tools (browser, canvas, nodes, cron, gateway) can be disabled
+  // via config to save ~500-2000 tokens per request.
+  const disabled = new Set(
+    (options?.disabledTools ?? []).map((t) => t.toLowerCase()),
+  );
+  const clawdisTools = disabled.size > 0
+    ? createClawdisTools().filter((t) => !disabled.has(t.name))
+    : createClawdisTools();
+
   const tools: AnyAgentTool[] = [
     ...base,
     bashTool as unknown as AnyAgentTool,
     processTool as unknown as AnyAgentTool,
-    ...createClawdisTools(),
+    ...clawdisTools,
   ];
   return tools.map(normalizeToolParameters);
 }
