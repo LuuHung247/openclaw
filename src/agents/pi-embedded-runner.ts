@@ -22,6 +22,7 @@ import {
   SettingsManager,
   type Skill,
 } from "@mariozechner/pi-coding-agent";
+import { getMemorySubstrate } from "../memory/sqlite.js";
 import type { ThinkLevel, VerboseLevel } from "../auto-reply/thinking.js";
 import { formatToolAggregate } from "../auto-reply/tool-meta.js";
 import type { ClawdisConfig } from "../config/config.js";
@@ -411,10 +412,29 @@ export async function runEmbeddedPiAgent(params: {
         const bootstrapFiles =
           await loadWorkspaceBootstrapFiles(resolvedWorkspace);
         const contextFiles = buildBootstrapContextFiles(bootstrapFiles);
+        // Inject contextual SQLite memory
+        try {
+          const memorySubstrate = getMemorySubstrate(resolvedWorkspace);
+          const recentMemories = memorySubstrate.recent(params.sessionId, 10);
+          if (recentMemories.length > 0) {
+            const memoryContent = recentMemories
+              .reverse()
+              .map((m) => `[${m.created_at}] ${m.source}:\n${m.content}`)
+              .join("\n\n---\n\n");
+            contextFiles.push({
+              path: "_memory.md",
+              content: `Recent short-term memories for this session:\n\n${memoryContent}`
+            });
+          }
+        } catch (e) {
+          // ignore memory read errors
+        }
+
         const promptSkills = resolvePromptSkills(skillsSnapshot, skillEntries);
         const tools = createClawdisCodingTools({
           bash: params.config?.agent?.bash,
           disabledTools: params.config?.agent?.disabledTools,
+          workspace: resolvedWorkspace,
         });
         const machineName = await getMachineDisplayName();
         const runtimeInfo = {
@@ -465,10 +485,27 @@ export async function runEmbeddedPiAgent(params: {
           contextFiles,
         });
 
-        const prior = await sanitizeSessionMessagesImages(
+        let prior = await sanitizeSessionMessagesImages(
           session.messages,
           "session:history",
         );
+
+        // --- Context Pruning Middleware ---
+        const keepLastTurns = params.config?.agent?.contextPruning?.keepLastTurns;
+        if (typeof keepLastTurns === "number" && keepLastTurns > 0) {
+          const userIndices: number[] = [];
+          for (let i = 0; i < prior.length; i++) {
+            if ((prior[i] as { role?: string }).role === "user") {
+              userIndices.push(i);
+            }
+          }
+          if (userIndices.length > keepLastTurns) {
+            const cutOff = userIndices[userIndices.length - keepLastTurns];
+            prior = prior.slice(cutOff);
+          }
+        }
+        // ----------------------------------
+
         if (prior.length > 0) {
           session.agent.replaceMessages(prior);
         }
@@ -614,6 +651,33 @@ export async function runEmbeddedPiAgent(params: {
             (p) =>
               p.text || p.mediaUrl || (p.mediaUrls && p.mediaUrls.length > 0),
           );
+
+        try {
+          const memorySubstrate = getMemorySubstrate(resolvedWorkspace);
+          // Store user prompt
+          if (params.prompt) {
+            memorySubstrate.store({
+              agent_id: params.sessionId,
+              content: params.prompt,
+              source: `session:${params.sessionId}`,
+              scope: "episodic",
+            });
+          }
+          // Store assistant response
+          for (const p of payloads) {
+            if (p.text) {
+              memorySubstrate.store({
+                agent_id: params.sessionId,
+                content: p.text,
+                source: `session:${params.sessionId}`,
+                scope: "episodic",
+              });
+            }
+          }
+        } catch (e) {
+          // Non-fatal, just log if needed
+          console.error("Failed to store memory:", e);
+        }
 
         return {
           payloads: payloads.length ? payloads : undefined,

@@ -5,6 +5,7 @@ packages:
 onlyBuiltDependencies:
   - '@whiskeysockets/baileys'
   - authenticate-pam
+  - better-sqlite3
   - esbuild
   - protobufjs
   - sharp

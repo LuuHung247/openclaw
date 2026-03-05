@@ -579,6 +579,11 @@ export type ClawdisConfig = {
      * Available: "clawdis_browser", "clawdis_canvas", "clawdis_nodes", "clawdis_cron", "clawdis_gateway"
      */
     disabledTools?: string[];
+    /** Context pruning settings */
+    contextPruning?: {
+      /** Number of conversation turns (user + assistant pairs) to keep. Always keeps the first few system/bootstrap messages. */
+      keepLastTurns?: number;
+    };
   };
   routing?: RoutingConfig;
   messages?: MessagesConfig;
@@ -946,6 +951,11 @@ const ClawdisSchema = z.object({
         })
         .optional(),
       disabledTools: z.array(z.string()).optional(),
+      contextPruning: z
+        .object({
+          keepLastTurns: z.number().int().positive().optional(),
+        })
+        .optional(),
     })
     .optional(),
   routing: RoutingSchema,

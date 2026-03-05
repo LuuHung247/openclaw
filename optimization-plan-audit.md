@@ -13,8 +13,8 @@
 |------|------|:---:|:---:|:---:|---------|:---:|
 | 1 — Trim workspace .md files | 01 | ✅ Manual | Không | N/A | ✅ Làm ngay | **✅ PASS** |
 | 1b — Slim ~/.clawdis/AGENTS.md | 01 | ✅ Manual | Không | N/A | ✅ Làm ngay | **✅ PASS** |
-| 2 — Context Pruning TTL | 01 | ❌ Không có | Có | ✅ `context_budget` | ⚠️ Phải tự build | ⏳ TODO |
-| 3 — Compaction Memory Flush | 01 | ❌ Không có | Có | ✅ `store_llm_summary` | ⚠️ Phải tự build | ⏳ TODO |
+| 2 — Context Pruning TTL | 01 | ✅ Config | Có | ✅ `context_budget` | ✅ `keepLastTurns` | **✅ PASS** |
+| 3 — SQLite Memory Substrate | 01 | ✅ Code | Có | ✅ `MemorySubstrate` | ✅ `better-sqlite3` port | **✅ PASS** |
 | 4 — Model Tiering (heartbeat) | 01 | ⚡ Một phần | Ít | ✅ `model_routing` | ✅ Config done | **✅ PASS** |
 | 5 — Tool Filtering via Config | 01 | ✅ Code + Config | Ít | ✅ `tool_policy + filter_tools_by_depth` | ✅ `disabledTools` config | **✅ PASS** |
 | 6 — Hybrid Search BM25+Vector | 02 | ❌ Không có | Nhiều | ❌ Chưa có | 🔴 Cần QMD sidecar | ⏳ TODO |
@@ -380,7 +380,7 @@ Chỉ nên cân nhắc khi:
 
 | Feature | Openfang Implementation | Có thể port? |
 |---------|------------------------|:---:|
-| SQLite Memory Substrate | `MemorySubstrate` (9 files, ~130KB code) | ⚠️ Rust → TS |
+| SQLite Memory Substrate | `MemorySubstrate` (9 files, ~130KB code) | ✅ **Đã port & tích hợp** |
 | Session Compaction | `store_llm_summary()` + auto-compact by threshold | ✅ Reference |
 | Semantic Memory + Embedding | `SemanticStore` + cosine similarity + BLOB embeddings | ✅ Reference |
 | Knowledge Graph | `KnowledgeStore` (entities + relations + graph query) | ✅ Reference |
@@ -398,15 +398,15 @@ Chỉ nên cân nhắc khi:
 
 | Prio | Việc | Effort | Impact | Risk |
 |:---:|------|--------|--------|------|
-| 🔴 1 | Trim AGENTS.md/BOOTSTRAP.md (<500 token) | 10 min | ⭐⭐⭐⭐⭐ | Zero |
-| 🔴 2 | Tạo SESSION-STATE.md (<200 token) | 15 min | ⭐⭐⭐⭐ | Zero |
-| 🟠 3 | Config heartbeat model rẻ (`deepseek-chat`) | 5 min | ⭐⭐⭐ | Zero |
-| 🟡 4 | Dynamic tool loading middleware | 3-4h | ⭐⭐⭐⭐⭐ | Medium |
-| 🟡 5 | Mem0 self-hosted + hook adapter | 2-3h | ⭐⭐⭐⭐ | Medium |
-| 🔵 6 | SQLite analytics (port từ openfang schema) | 2h | ⭐⭐⭐ | Low |
-| 🔵 7 | Context pruning middleware (last N turns) | 2h | ⭐⭐⭐ | Low |
-| ⚪ 8 | Compaction memory flush hook | 3h | ⭐⭐⭐ | Medium |
-| ⚪ 9 | Hybrid search (QMD/Orama/LanceDB) | 4-8h | ⭐⭐⭐⭐ | High |
+| 🔴 1 | Trim AGENTS.md/BOOTSTRAP.md (<500 token) | 10 min | ⭐⭐⭐⭐⭐ | Zero | ✅ Done |
+| 🔴 2 | Tạo SESSION-STATE.md (<200 token) | 15 min | ⭐⭐⭐⭐ | Zero | ✅ Done |
+| 🟠 3 | Config heartbeat model rẻ (`deepseek-chat`) | 5 min | ⭐⭐⭐ | Zero | ✅ Done |
+| 🟡 4 | Dynamic tool filtering qua config | 30m | ⭐⭐⭐⭐⭐ | Medium | ✅ Done |
+| 🟡 5 | SQLite Memory Backend (Conversation History) | 1h | ⭐⭐⭐⭐⭐ | Medium | ✅ Done |
+| 🔵 6 | Context pruning middleware (giới hạn N turns) | 2h | ⭐⭐⭐ | Low | ✅ Done |
+| 🔵 7 | Usage Analytics SQLite | 2h | ⭐⭐⭐ | Low | ⏳ TODO |
+| ⚪ 8 | Hybrid search (Orama/LanceDB/QMD) | 4-8h | ⭐⭐⭐⭐ | High | ⏳ TODO |
+| ⚪ 9 | Mem0 self-hosted / Memory refinement | 3h | ⭐⭐⭐⭐ | Medium | ⏳ TODO |
 
 > **Key insight**: Bước 1-3 làm trong 30 phút, 0 risk, giảm ~40-60% token ngay.
 > Bước 4-5 cần code, nhưng có openfang làm reference rõ ràng.

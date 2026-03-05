@@ -231,6 +231,7 @@ function createClawdisReadTool(base: AnyAgentTool): AnyAgentTool {
 export function createClawdisCodingTools(options?: {
   bash?: BashToolDefaults & ProcessToolDefaults;
   disabledTools?: string[];
+  workspace?: string;
 }): AnyAgentTool[] {
   const bashToolName = "bash";
   const base = (codingTools as unknown as AnyAgentTool[]).flatMap((tool) => {
