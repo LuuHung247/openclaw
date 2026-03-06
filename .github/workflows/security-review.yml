@@ -3,6 +3,12 @@ name: Security Review (GLM-4.7)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review'
+        required: true
+        type: string
 
 jobs:
   security-review:
@@ -36,7 +42,7 @@ jobs:
           ANTHROPIC_MODEL: glm-4.7
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
           cd /tmp/claude-code-security-review
           mkdir -p /tmp/security-reports
