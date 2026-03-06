@@ -1,0 +1,51 @@
+name: Security Review (GLM-4.7)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  security-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install security review tool
+        run: |
+          cd /tmp
+          git clone https://github.com/LuuHung247/claude-code-security-review.git || true
+          cd claude-code-security-review
+          pip install -q -r claudecode/requirements.txt
+
+      - name: Run security review
+        env:
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.Z_AI_AUTH_TOKEN }}
+          ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+          ANTHROPIC_MODEL: glm-4.7
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          cd /tmp/claude-code-security-review
+          mkdir -p /tmp/security-reports
+          python -m claudecode.audit 2>&1 | tee /tmp/security-reports/review-${{ github.run_id }}.log
+
+      - name: Upload security review report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-review-report-${{ github.run_id }}
+          path: /tmp/security-reports/
+          retention-days: 30
