@@ -229,6 +229,8 @@ function settingsPage() {
       this.defaultModelSaving = true;
       try {
         await OpenFangAPI.post('/api/config', { agent: { model: this.defaultModel } });
+        // Reload config to confirm persisted value and sync UI state
+        await this.loadConfig();
         OpenFangToast.success('Default model saved: ' + this.defaultModel);
       } catch(e) {
         OpenFangToast.error('Failed to save model: ' + e.message);

@@ -233,10 +233,17 @@ function mapThinkingLevel(level?: ThinkLevel): ThinkingLevel {
   return level;
 }
 
+// Map from our canonical provider IDs (config/UI) to Pi SDK's internal IDs.
+// Must stay in sync with the same map in model-catalog.ts.
+const PROVIDER_TO_PISDK: Record<string, string> = {
+  gemini: "google",
+};
+
 function resolveModel(
   provider: string,
   modelId: string,
   agentDir?: string,
+  cfg?: ClawdisConfig,
 ): {
   model?: Model<Api>;
   error?: string;
@@ -245,8 +252,20 @@ function resolveModel(
 } {
   const resolvedAgentDir = agentDir ?? resolveClawdisAgentDir();
   const authStorage = discoverAuthStorage(resolvedAgentDir);
+
+  // Bridge API keys for built-in providers that differ between our IDs and Pi SDK IDs.
+  const cfgProviders = cfg?.models?.providers ?? {};
+  for (const [ourId, sdkId] of Object.entries(PROVIDER_TO_PISDK)) {
+    const key = (cfgProviders[ourId] as { apiKey?: string } | undefined)?.apiKey?.trim();
+    if (key) {
+      authStorage.set(sdkId, { type: "api_key", key });
+    }
+  }
+
+  // Translate our provider ID to Pi SDK's internal ID before lookup.
+  const sdkProvider = PROVIDER_TO_PISDK[provider] ?? provider;
   const modelRegistry = discoverModels(authStorage, resolvedAgentDir);
-  const model = modelRegistry.find(provider, modelId) as Model<Api> | null;
+  const model = modelRegistry.find(sdkProvider, modelId) as Model<Api> | null;
   if (!model) {
     return {
       error: `Unknown model: ${provider}/${modelId}`,
@@ -369,6 +388,7 @@ export async function runEmbeddedPiAgent(params: {
         provider,
         modelId,
         agentDir,
+        params.config,
       );
       if (!model) {
         throw new Error(error ?? `Unknown model: ${provider}/${modelId}`);
@@ -412,18 +432,21 @@ export async function runEmbeddedPiAgent(params: {
         const bootstrapFiles =
           await loadWorkspaceBootstrapFiles(resolvedWorkspace);
         const contextFiles = buildBootstrapContextFiles(bootstrapFiles);
-        // Inject contextual SQLite memory
+        // Inject contextual SQLite memory (hybrid BM25 + vector when prompt available)
         try {
-          const memorySubstrate = getMemorySubstrate(resolvedWorkspace);
-          const recentMemories = memorySubstrate.recent(params.sessionId, 10);
-          if (recentMemories.length > 0) {
-            const memoryContent = recentMemories
+          const geminiKey = (params.config?.models?.providers?.["gemini"] as { apiKey?: string } | undefined)?.apiKey?.trim();
+          const memorySubstrate = getMemorySubstrate(resolvedWorkspace, geminiKey);
+          const memories = params.prompt
+            ? await memorySubstrate.recallHybrid(params.prompt, params.sessionId, 10)
+            : memorySubstrate.recent(params.sessionId, 10);
+          if (memories.length > 0) {
+            const memoryContent = [...memories]
               .reverse()
               .map((m) => `[${m.created_at}] ${m.source}:\n${m.content}`)
               .join("\n\n---\n\n");
             contextFiles.push({
               path: "_memory.md",
-              content: `Recent short-term memories for this session:\n\n${memoryContent}`
+              content: `Relevant memories for this session:\n\n${memoryContent}`
             });
           }
         } catch (e) {
@@ -653,7 +676,8 @@ export async function runEmbeddedPiAgent(params: {
           );
 
         try {
-          const memorySubstrate = getMemorySubstrate(resolvedWorkspace);
+          const geminiKey = (params.config?.models?.providers?.["gemini"] as { apiKey?: string } | undefined)?.apiKey?.trim();
+          const memorySubstrate = getMemorySubstrate(resolvedWorkspace, geminiKey);
           // Store user prompt
           if (params.prompt) {
             memorySubstrate.store({
@@ -673,6 +697,22 @@ export async function runEmbeddedPiAgent(params: {
                 scope: "episodic",
               });
             }
+          }
+          // Log token usage
+          if (usage) {
+            memorySubstrate.logUsage({
+              agent_id: params.sessionId,
+              provider: agentMeta.provider || "unknown",
+              model: agentMeta.model || "unknown",
+              usage: {
+                input: usage.input || 0,
+                output: usage.output || 0,
+                cacheRead: usage.cacheRead || 0,
+                cacheWrite: usage.cacheWrite || 0,
+                total: usage.totalTokens || 0,
+              },
+              durationMs: Date.now() - started,
+            });
           }
         } catch (e) {
           // Non-fatal, just log if needed

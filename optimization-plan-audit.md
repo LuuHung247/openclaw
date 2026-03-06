@@ -390,7 +390,7 @@ Chỉ nên cân nhắc khi:
 | Memory Consolidation/Decay | `ConsolidationEngine` (confidence decay over time) | ✅ Nice to have |
 | Hybrid BM25+Vector Search | ❌ Không có (chỉ LIKE + cosine) | N/A |
 | Mem0 / QMD integration | ❌ Không có | N/A |
-| Usage Analytics SQLite | `UsageStore` + `usage_events` table | ✅ Đang TODO |
+| Usage Analytics SQLite | `UsageStore` + `usage_events` table | ✅ **Đã port & tích hợp** |
 
 ---
 
@@ -404,7 +404,7 @@ Chỉ nên cân nhắc khi:
 | 🟡 4 | Dynamic tool filtering qua config | 30m | ⭐⭐⭐⭐⭐ | Medium | ✅ Done |
 | 🟡 5 | SQLite Memory Backend (Conversation History) | 1h | ⭐⭐⭐⭐⭐ | Medium | ✅ Done |
 | 🔵 6 | Context pruning middleware (giới hạn N turns) | 2h | ⭐⭐⭐ | Low | ✅ Done |
-| 🔵 7 | Usage Analytics SQLite | 2h | ⭐⭐⭐ | Low | ⏳ TODO |
+| 🔵 7 | Usage Analytics SQLite | 2h | ⭐⭐⭐ | Low | ✅ Done |
 | ⚪ 8 | Hybrid search (Orama/LanceDB/QMD) | 4-8h | ⭐⭐⭐⭐ | High | ⏳ TODO |
 | ⚪ 9 | Mem0 self-hosted / Memory refinement | 3h | ⭐⭐⭐⭐ | Medium | ⏳ TODO |
 

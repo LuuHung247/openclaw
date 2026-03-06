@@ -1440,7 +1440,7 @@ var OpenFangAPI = (function() {
             { id: 'glm-4.7',      name: 'GLM-4.7',       reasoning: true, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 204800, maxTokens: 131072 },
             { id: 'glm-4.7-flash',name: 'GLM-4.7 Flash', reasoning: true, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 204800, maxTokens: 131072 }
           ]
-        }
+        },
       };
 
       var preset = PROVIDER_PRESETS[provId];
