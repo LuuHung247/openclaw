@@ -1,8 +1,6 @@
-name: Security Review (Claude Code)
+name: Security Review (GLM-4.7)
 
 on:
-  push:
-    branches: [main, develop, osp-devop-custome]
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -17,7 +15,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Full history for diff analysis
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,20 +36,11 @@ jobs:
           ANTHROPIC_MODEL: glm-4.7
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          REPO_PATH: ${{ github.workspace }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           cd /tmp/claude-code-security-review
           mkdir -p /tmp/security-reports
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "Running security review on PR #${{ github.event.pull_request.number }}"
-            python -m claudecode.github_action_audit \
-              --repo "${{ github.repository }}" \
-              --pr-number "${{ github.event.pull_request.number }}" \
-              --github-token "${{ secrets.GITHUB_TOKEN }}" 2>&1 | tee /tmp/security-reports/review-${{ github.run_id }}.log
-          else
-            echo "Running security review on push to ${{ github.ref }}"
-            python -m claudecode.audit 2>&1 | tee /tmp/security-reports/review-${{ github.run_id }}.log
-          fi
+          python -m claudecode.audit 2>&1 | tee /tmp/security-reports/review-${{ github.run_id }}.log
 
       - name: Upload security review report
         if: always()
@@ -60,13 +49,3 @@ jobs:
           name: security-review-report-${{ github.run_id }}
           path: /tmp/security-reports/
           retention-days: 30
-
-      - name: Security review summary
-        if: always()
-        run: |
-          echo "## Security Review Report" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch**: ${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Review log available in Actions artifacts" >> $GITHUB_STEP_SUMMARY
