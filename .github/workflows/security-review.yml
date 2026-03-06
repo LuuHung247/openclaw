@@ -3,8 +3,6 @@ name: Security Review (GLM-4.7)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  push:
-    branches: [main, osp-devop-custome]
 
 jobs:
   security-review:
