@@ -46,13 +46,24 @@ jobs:
               --github-token "${{ secrets.GITHUB_TOKEN }}"
           else
             echo "Security review triggered on push to branch: ${{ github.ref }}"
-            python -m claudecode.audit --repo-path "${{ github.workspace }}" || true
+            mkdir -p /tmp/security-reports
+            python -m claudecode.audit --repo-path "${{ github.workspace }}" 2>&1 | tee /tmp/security-reports/review-${{ github.run_id }}.log
           fi
 
-      - name: Comment PR with findings
+      - name: Upload security review report
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            // If security review generated findings, they'll be auto-commented by claudecode
-            core.notice('Security review completed. Check PR comments for details.');
+          name: security-review-report-${{ github.run_id }}
+          path: /tmp/security-reports/
+          retention-days: 30
+
+      - name: Security review summary
+        if: always()
+        run: |
+          echo "## Security Review Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch**: ${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Review log available in Actions artifacts" >> $GITHUB_STEP_SUMMARY
