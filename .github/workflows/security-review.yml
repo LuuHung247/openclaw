@@ -39,10 +39,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd /tmp/claude-code-security-review
-          python -m claudecode.github_action_audit \
-            --repo "${{ github.repository }}" \
-            --pr-number "${{ github.event.pull_request.number }}" \
-            --github-token "${{ secrets.GITHUB_TOKEN }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python -m claudecode.github_action_audit \
+              --repo "${{ github.repository }}" \
+              --pr-number "${{ github.event.pull_request.number }}" \
+              --github-token "${{ secrets.GITHUB_TOKEN }}"
+          else
+            echo "Security review triggered on push to branch: ${{ github.ref }}"
+            python -m claudecode.audit --repo-path "${{ github.workspace }}" || true
+          fi
 
       - name: Comment PR with findings
         if: always()
