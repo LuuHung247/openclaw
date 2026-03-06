@@ -45,6 +45,7 @@ jobs:
 
       - name: Run security review
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.Z_AI_AUTH_TOKEN }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.Z_AI_AUTH_TOKEN }}
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_MODEL: glm-4.7
