@@ -945,3 +945,4 @@ CREATE INDEX idx_memories_scope ON memories(scope, deleted);
 
 Có thể port schema này vào OpenClaw dùng `better-sqlite3`.
 # Testing PR workflow
+
