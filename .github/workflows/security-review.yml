@@ -37,17 +37,20 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_MODEL: glm-4.7
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          REPO_PATH: ${{ github.workspace }}
         run: |
           cd /tmp/claude-code-security-review
+          mkdir -p /tmp/security-reports
           if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Running security review on PR #${{ github.event.pull_request.number }}"
             python -m claudecode.github_action_audit \
               --repo "${{ github.repository }}" \
               --pr-number "${{ github.event.pull_request.number }}" \
-              --github-token "${{ secrets.GITHUB_TOKEN }}"
+              --github-token "${{ secrets.GITHUB_TOKEN }}" 2>&1 | tee /tmp/security-reports/review-${{ github.run_id }}.log
           else
-            echo "Security review triggered on push to branch: ${{ github.ref }}"
-            mkdir -p /tmp/security-reports
-            python -m claudecode.audit --repo-path "${{ github.workspace }}" 2>&1 | tee /tmp/security-reports/review-${{ github.run_id }}.log
+            echo "Running security review on push to ${{ github.ref }}"
+            python -m claudecode.audit 2>&1 | tee /tmp/security-reports/review-${{ github.run_id }}.log
           fi
 
       - name: Upload security review report
