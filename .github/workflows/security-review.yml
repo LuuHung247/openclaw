@@ -39,7 +39,8 @@ jobs:
       - name: Install security review tool
         run: |
           cd /tmp
-          git clone https://github.com/LuuHung247/claude-code-security-review.git || true
+          rm -rf claude-code-security-review
+          git clone https://github.com/LuuHung247/claude-code-security-review.git
           cd claude-code-security-review
           pip install -q -r claudecode/requirements.txt
 
