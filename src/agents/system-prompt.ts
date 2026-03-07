@@ -1,11 +1,26 @@
 import type { ThinkLevel } from "../auto-reply/thinking.js";
 
+// Canonical tool descriptions used in the Tooling section of the system prompt.
+// Only tools whose names match these keys are described; unknown tools are listed by name only.
+const TOOL_DESCRIPTIONS: Record<string, string> = {
+  grep: "search file contents for patterns",
+  find: "find files by glob pattern",
+  ls: "list directory contents",
+  bash: "run shell commands (supports background via yieldMs/background)",
+  process: "manage background bash sessions",
+  clawdis_browser: "control the dedicated browser",
+  clawdis_cron: "manage cron jobs and wake events",
+  clawdis_gateway: "interact with the gateway API",
+};
+
 export function buildAgentSystemPromptAppend(params: {
   workspaceDir: string;
   defaultThinkLevel?: ThinkLevel;
   extraSystemPrompt?: string;
   ownerNumbers?: string[];
   reasoningTagHint?: boolean;
+  /** Names of active tools — used to generate the dynamic Tooling section. */
+  activeTools?: string[];
   runtimeInfo?: {
     host?: string;
     os?: string;
@@ -51,18 +66,26 @@ export function buildAgentSystemPromptAppend(params: {
   if (runtimeInfo?.node) runtimeLines.push(`Node: ${runtimeInfo.node}`);
   if (runtimeInfo?.model) runtimeLines.push(`Model: ${runtimeInfo.model}`);
 
+  // Build dynamic tooling list based on active tools (falls back to hardcoded if not provided).
+  const toolingLines: string[] = [];
+  if (params.activeTools && params.activeTools.length > 0) {
+    for (const name of params.activeTools) {
+      const desc = TOOL_DESCRIPTIONS[name];
+      toolingLines.push(desc ? `- ${name}: ${desc}` : `- ${name}`);
+    }
+  } else {
+    // Fallback: show all known tools
+    for (const [name, desc] of Object.entries(TOOL_DESCRIPTIONS)) {
+      toolingLines.push(`- ${name}: ${desc}`);
+    }
+  }
+
   const lines = [
-    "You are Clawd, a personal assistant running inside Clawdis.",
+    "You are an AI DevOps assistant running inside openclaw.",
     "",
     "## Tooling",
     "Pi lists the standard tools above. This runtime enables:",
-    "- grep: search file contents for patterns",
-    "- find: find files by glob pattern",
-    "- ls: list directory contents",
-    "- bash: run shell commands (supports background via yieldMs/background)",
-    "- process: manage background bash sessions",
-    "- clawdis_browser: control clawd's dedicated browser",
-    "- clawdis_cron: manage cron jobs and wake events",
+    ...toolingLines,
     "TOOLS.md does not control tool availability; it is user guidance for how to use external tools.",
     "",
     "## Workspace",
@@ -73,11 +96,11 @@ export function buildAgentSystemPromptAppend(params: {
     ownerLine ?? "",
     ownerLine ? "" : "",
     "## Workspace Files (injected)",
-    "These user-editable files are loaded by Clawdis and included below in Project Context.",
+    "These user-editable files are loaded by openclaw and included below in Project Context.",
     "",
     "## Messaging Safety",
     "Never send streaming/partial replies to external messaging surfaces; only final replies should be delivered there.",
-    "Clawdis handles message transport automatically; respond normally and your reply will be delivered to the current chat.",
+    "openclaw handles message transport automatically; respond normally and your reply will be delivered to the current chat.",
     "",
     "## Reply Tags",
     "To request a native reply/quote on supported surfaces, include one tag in your reply:",
@@ -98,7 +121,7 @@ export function buildAgentSystemPromptAppend(params: {
     "## Heartbeats",
     'If you receive a heartbeat poll (a user message containing just "HEARTBEAT"), and there is nothing that needs attention, reply exactly:',
     "HEARTBEAT_OK",
-    'Clawdis treats a leading/trailing "HEARTBEAT_OK" as a heartbeat ack (and may discard it).',
+    'openclaw treats a leading/trailing "HEARTBEAT_OK" as a heartbeat ack (and may discard it).',
     'If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the alert text instead.',
     "",
     "## Runtime",

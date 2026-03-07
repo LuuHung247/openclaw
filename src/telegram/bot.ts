@@ -284,6 +284,69 @@ export function createTelegramWebhookCallback(
   return { path, handler: webhookCallback(bot, "http") };
 }
 
+async function deliverTextReply(
+  bot: Bot,
+  chatId: string,
+  text: string,
+  runtime: RuntimeEnv,
+  opts: { replyToMessageId?: number; textLimit: number; hasReplied: boolean },
+): Promise<boolean> {
+  let hasReplied = opts.hasReplied;
+  for (const chunk of chunkText(text, opts.textLimit)) {
+    await sendTelegramText(bot, chatId, chunk, runtime, {
+      replyToMessageId:
+        opts.replyToMessageId && !hasReplied
+          ? opts.replyToMessageId
+          : undefined,
+    });
+    if (opts.replyToMessageId && !hasReplied) hasReplied = true;
+  }
+  return hasReplied;
+}
+
+async function deliverMediaReply(
+  bot: Bot,
+  chatId: string,
+  mediaList: string[],
+  caption: string | undefined,
+  replyToMessageId: number | undefined,
+  hasReplied: boolean,
+): Promise<boolean> {
+  let first = true;
+  for (const mediaUrl of mediaList) {
+    const media = await loadWebMedia(mediaUrl);
+    const kind = mediaKindFromMime(media.contentType ?? undefined);
+    const file = new InputFile(media.buffer, media.fileName ?? "file");
+    const itemCaption = first ? caption : undefined;
+    first = false;
+    const replyId =
+      replyToMessageId && !hasReplied ? replyToMessageId : undefined;
+    if (kind === "image") {
+      await bot.api.sendPhoto(chatId, file, {
+        caption: itemCaption,
+        reply_to_message_id: replyId,
+      });
+    } else if (kind === "video") {
+      await bot.api.sendVideo(chatId, file, {
+        caption: itemCaption,
+        reply_to_message_id: replyId,
+      });
+    } else if (kind === "audio") {
+      await bot.api.sendAudio(chatId, file, {
+        caption: itemCaption,
+        reply_to_message_id: replyId,
+      });
+    } else {
+      await bot.api.sendDocument(chatId, file, {
+        caption: itemCaption,
+        reply_to_message_id: replyId,
+      });
+    }
+    if (replyToMessageId && !hasReplied) hasReplied = true;
+  }
+  return hasReplied;
+}
+
 async function deliverReplies(params: {
   replies: ReplyPayload[];
   chatId: string;
@@ -293,7 +356,8 @@ async function deliverReplies(params: {
   replyToMode: ReplyToMode;
   textLimit?: number;
 }) {
-  const { replies, chatId, runtime, bot, replyToMode, textLimit = 4096 } = params;
+  const { replies, chatId, runtime, bot, replyToMode, textLimit = 4096 } =
+    params;
   let hasReplied = false;
   for (const reply of replies) {
     if (!reply?.text && !reply?.mediaUrl && !(reply?.mediaUrls?.length ?? 0)) {
@@ -304,61 +368,28 @@ async function deliverReplies(params: {
       replyToMode === "off"
         ? undefined
         : resolveTelegramReplyId(reply.replyToId);
+    const replyToMessageId =
+      replyToId && (replyToMode === "all" || !hasReplied) ? replyToId : undefined;
     const mediaList = reply.mediaUrls?.length
       ? reply.mediaUrls
       : reply.mediaUrl
         ? [reply.mediaUrl]
         : [];
     if (mediaList.length === 0) {
-      for (const chunk of chunkText(reply.text || "", textLimit)) {
-        await sendTelegramText(bot, chatId, chunk, runtime, {
-          replyToMessageId:
-            replyToId && (replyToMode === "all" || !hasReplied)
-              ? replyToId
-              : undefined,
-        });
-        if (replyToId && !hasReplied) {
-          hasReplied = true;
-        }
-      }
-      continue;
-    }
-    // media with optional caption on first item
-    let first = true;
-    for (const mediaUrl of mediaList) {
-      const media = await loadWebMedia(mediaUrl);
-      const kind = mediaKindFromMime(media.contentType ?? undefined);
-      const file = new InputFile(media.buffer, media.fileName ?? "file");
-      const caption = first ? (reply.text ?? undefined) : undefined;
-      first = false;
-      const replyToMessageId =
-        replyToId && (replyToMode === "all" || !hasReplied)
-          ? replyToId
-          : undefined;
-      if (kind === "image") {
-        await bot.api.sendPhoto(chatId, file, {
-          caption,
-          reply_to_message_id: replyToMessageId,
-        });
-      } else if (kind === "video") {
-        await bot.api.sendVideo(chatId, file, {
-          caption,
-          reply_to_message_id: replyToMessageId,
-        });
-      } else if (kind === "audio") {
-        await bot.api.sendAudio(chatId, file, {
-          caption,
-          reply_to_message_id: replyToMessageId,
-        });
-      } else {
-        await bot.api.sendDocument(chatId, file, {
-          caption,
-          reply_to_message_id: replyToMessageId,
-        });
-      }
-      if (replyToId && !hasReplied) {
-        hasReplied = true;
-      }
+      hasReplied = await deliverTextReply(bot, chatId, reply.text || "", runtime, {
+        replyToMessageId,
+        textLimit,
+        hasReplied,
+      });
+    } else {
+      hasReplied = await deliverMediaReply(
+        bot,
+        chatId,
+        mediaList,
+        reply.text ?? undefined,
+        replyToMessageId,
+        hasReplied,
+      );
     }
   }
 }

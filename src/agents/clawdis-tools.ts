@@ -45,11 +45,10 @@ import { callGateway } from "../gateway/call.js";
 import { GATEWAY_DEFAULT_WS_URL } from "../gateway/constants.js";
 import { detectMime, imageMimeFromFormat } from "../media/mime.js";
 import { sanitizeToolResultImages } from "./tool-images.js";
+import { readStringParam, readStringArrayParam } from "./tool-params.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: TypeBox schema type from pi-agent-core uses a different module instance.
 type AnyAgentTool = AgentTool<any, unknown>;
-
-const DEFAULT_GATEWAY_URL = GATEWAY_DEFAULT_WS_URL;
 
 type GatewayCallOptions = {
   gatewayUrl?: string;
@@ -61,7 +60,7 @@ function resolveGatewayOptions(opts?: GatewayCallOptions) {
   const url =
     typeof opts?.gatewayUrl === "string" && opts.gatewayUrl.trim()
       ? opts.gatewayUrl.trim()
-      : DEFAULT_GATEWAY_URL;
+      : GATEWAY_DEFAULT_WS_URL;
   const token =
     typeof opts?.gatewayToken === "string" && opts.gatewayToken.trim()
       ? opts.gatewayToken.trim()
@@ -73,80 +72,6 @@ function resolveGatewayOptions(opts?: GatewayCallOptions) {
   return { url, token, timeoutMs };
 }
 
-type StringParamOptions = {
-  required?: boolean;
-  trim?: boolean;
-  label?: string;
-};
-
-function readStringParam(
-  params: Record<string, unknown>,
-  key: string,
-  options: StringParamOptions & { required: true },
-): string;
-function readStringParam(
-  params: Record<string, unknown>,
-  key: string,
-  options?: StringParamOptions,
-): string | undefined;
-function readStringParam(
-  params: Record<string, unknown>,
-  key: string,
-  options: StringParamOptions = {},
-) {
-  const { required = false, trim = true, label = key } = options;
-  const raw = params[key];
-  if (typeof raw !== "string") {
-    if (required) throw new Error(`${label} required`);
-    return undefined;
-  }
-  const value = trim ? raw.trim() : raw;
-  if (!value) {
-    if (required) throw new Error(`${label} required`);
-    return undefined;
-  }
-  return value;
-}
-
-function readStringArrayParam(
-  params: Record<string, unknown>,
-  key: string,
-  options: StringParamOptions & { required: true },
-): string[];
-function readStringArrayParam(
-  params: Record<string, unknown>,
-  key: string,
-  options?: StringParamOptions,
-): string[] | undefined;
-function readStringArrayParam(
-  params: Record<string, unknown>,
-  key: string,
-  options: StringParamOptions = {},
-) {
-  const { required = false, label = key } = options;
-  const raw = params[key];
-  if (Array.isArray(raw)) {
-    const values = raw
-      .filter((entry) => typeof entry === "string")
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-    if (values.length === 0) {
-      if (required) throw new Error(`${label} required`);
-      return undefined;
-    }
-    return values;
-  }
-  if (typeof raw === "string") {
-    const value = raw.trim();
-    if (!value) {
-      if (required) throw new Error(`${label} required`);
-      return undefined;
-    }
-    return [value];
-  }
-  if (required) throw new Error(`${label} required`);
-  return undefined;
-}
 
 async function callGatewayTool<T = unknown>(
   method: string,

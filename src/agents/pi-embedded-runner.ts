@@ -289,6 +289,7 @@ export async function runEmbeddedPiAgent(params: {
             extraSystemPrompt: params.extraSystemPrompt,
             ownerNumbers: params.ownerNumbers,
             reasoningTagHint,
+            activeTools: tools.map((t) => t.name),
             runtimeInfo,
           }),
           contextFiles,
