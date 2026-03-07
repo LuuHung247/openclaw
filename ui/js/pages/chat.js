@@ -125,6 +125,21 @@ function chatPage() {
         self.autoLoadAgent();
       }
 
+      // Listen for model changes from Settings page — re-fetch from gateway (source of truth)
+      window.addEventListener('openclaw:model-changed', function() {
+        OpenFangAPI.getStatus().then(function(s) {
+          var model = s.default_model || '';
+          if (!model || model === '?') return;
+          var parts = model.split('/');
+          var modelName = parts.length >= 2 ? parts.slice(1).join('/') : model;
+          if (self.currentAgent) {
+            self.currentAgent.model = model;
+            self.currentAgent.model_provider = '';
+            self.currentAgent.model_name = modelName;
+          }
+        }).catch(function() {});
+      });
+
       // Watch for future pending agent selections (e.g., user clicks agent while on chat)
       this.$watch('$store.app.pendingAgent', function(agent) {
         if (agent) {
@@ -287,25 +302,58 @@ function chatPage() {
           self.scrollToBottom();
           break;
         case '/context':
-          // Send via WS command
-          if (self.currentAgent && OpenFangAPI.isWsConnected()) {
-            OpenFangAPI.wsSend({ type: 'command', command: 'context', args: '' });
+          if (self.currentAgent) {
+            OpenFangAPI.getSessions().then(function(res) {
+              var list = (res && res.sessions) || [];
+              var s = list.find(function(x) { return x.agent_id === self.currentAgent.id || x.session_key === self.currentAgent.id; });
+              var used = s ? (s.context_tokens || 0) : 0;
+              var pct = s ? (s.context_pct || 0).toFixed(1) : '?';
+              self.messages.push({ id: ++msgId, role: 'system', text: '**Context Window**\n- Used: ' + used.toLocaleString() + ' tokens\n- Pressure: ' + pct + '%', meta: '', tools: [] });
+              self.scrollToBottom();
+            }).catch(function() {
+              self.messages.push({ id: ++msgId, role: 'system', text: 'Could not fetch context info.', meta: '', tools: [] });
+              self.scrollToBottom();
+            });
           } else {
             self.messages.push({ id: ++msgId, role: 'system', text: 'Not connected. Connect to an agent first.', meta: '', tools: [] });
             self.scrollToBottom();
           }
           break;
         case '/verbose':
-          if (self.currentAgent && OpenFangAPI.isWsConnected()) {
-            OpenFangAPI.wsSend({ type: 'command', command: 'verbose', args: cmdArgs });
+          if (self.currentAgent) {
+            var newLevel;
+            if (cmdArgs === 'off' || cmdArgs === 'on' || cmdArgs === 'full') {
+              newLevel = cmdArgs;
+            } else {
+              var cur = self.currentAgent.verboseLevel || 'off';
+              newLevel = cur === 'off' ? 'on' : cur === 'on' ? 'full' : 'off';
+            }
+            var patchVal = newLevel === 'off' ? null : newLevel;
+            OpenFangAPI.request('sessions.patch', { key: self.currentAgent.id, verboseLevel: patchVal }).then(function() {
+              if (self.currentAgent) self.currentAgent.verboseLevel = newLevel;
+              self.messages.push({ id: ++msgId, role: 'system', text: 'Verbose level set to **' + newLevel + '**', meta: '', tools: [] });
+              self.scrollToBottom();
+            }).catch(function(e) {
+              self.messages.push({ id: ++msgId, role: 'system', text: 'Failed to set verbose: ' + (e && e.message || String(e)), meta: '', tools: [] });
+              self.scrollToBottom();
+            });
           } else {
             self.messages.push({ id: ++msgId, role: 'system', text: 'Not connected. Connect to an agent first.', meta: '', tools: [] });
             self.scrollToBottom();
           }
           break;
         case '/queue':
-          if (self.currentAgent && OpenFangAPI.isWsConnected()) {
-            OpenFangAPI.wsSend({ type: 'command', command: 'queue', args: '' });
+          if (self.currentAgent) {
+            OpenFangAPI.getSessions().then(function(res) {
+              var list = (res && res.sessions) || [];
+              var s = list.find(function(x) { return x.agent_id === self.currentAgent.id || x.session_key === self.currentAgent.id; });
+              var state = s ? (s.running ? 'running' : 'idle') : 'unknown';
+              self.messages.push({ id: ++msgId, role: 'system', text: '**Agent Queue**\n- State: ' + state + '\n- Processing: ' + (state === 'running' ? 'Yes' : 'No'), meta: '', tools: [] });
+              self.scrollToBottom();
+            }).catch(function() {
+              self.messages.push({ id: ++msgId, role: 'system', text: 'Could not fetch queue status.', meta: '', tools: [] });
+              self.scrollToBottom();
+            });
           } else {
             self.messages.push({ id: ++msgId, role: 'system', text: 'Not connected.', meta: '', tools: [] });
             self.scrollToBottom();
@@ -326,8 +374,19 @@ function chatPage() {
                 self.scrollToBottom();
               }).catch(function(e) { OpenFangToast.error('Model switch failed: ' + e.message); });
             } else {
-              self.messages.push({ id: ++msgId, role: 'system', text: '**Current Model**\n- Provider: `' + (self.currentAgent.model_provider || '?') + '`\n- Model: `' + (self.currentAgent.model_name || '?') + '`', meta: '', tools: [] });
-              self.scrollToBottom();
+              // Fetch live model from gateway instead of reading stale local state
+              OpenFangAPI.getSessions().then(function(res) {
+                var list = (res && res.sessions) || [];
+                var s = list.find(function(x) { return x.agent_id === self.currentAgent.id || x.session_key === self.currentAgent.id; });
+                var model = (s && s.model) || self.currentAgent.model_name || '?';
+                if (s && s.model) { self.currentAgent.model_name = s.model; }
+                self.messages.push({ id: ++msgId, role: 'system', text: '**Current Model**\n- Model: `' + model + '`', meta: '', tools: [] });
+                self.scrollToBottom();
+              }).catch(function() {
+                var model = self.currentAgent.model_name || '?';
+                self.messages.push({ id: ++msgId, role: 'system', text: '**Current Model**\n- Model: `' + model + '`', meta: '', tools: [] });
+                self.scrollToBottom();
+              });
             }
           } else {
             self.messages.push({ id: ++msgId, role: 'system', text: 'No agent selected.', meta: '', tools: [] });
@@ -379,8 +438,21 @@ function chatPage() {
 
     async autoLoadAgent() {
       // WebUI always uses a dedicated 'webui' session to avoid conflict with Telegram/other channels
-      var webuiAgent = { id: 'webui', name: 'WebUI Chat', state: 'Idle', status: 'idle', model_provider: '', model_name: '', provider: '', identity: {} };
+      // Fetch actual model from gateway config (source of truth)
+      var webuiAgent = { id: 'webui', name: 'WebUI Chat', state: 'Idle', status: 'idle', model: '', model_provider: '', model_name: '', provider: '', identity: {} };
       this.selectAgent(webuiAgent);
+      // Async update header with real model from gateway
+      var self = this;
+      OpenFangAPI.getStatus().then(function(s) {
+        var model = s.default_model || '';
+        var parts = model ? model.split('/') : [];
+        var modelName = parts.length >= 2 ? parts.slice(1).join('/') : model;
+        if (self.currentAgent && self.currentAgent.id === 'webui') {
+          self.currentAgent.model = model;
+          self.currentAgent.model_provider = '';
+          self.currentAgent.model_name = modelName;
+        }
+      }).catch(function() {});
     },
 
     selectAgent(agent) {

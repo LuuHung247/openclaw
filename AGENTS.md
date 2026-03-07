@@ -1,78 +1,173 @@
-# Repository Guidelines
 
-## Project Structure & Module Organization
-- Source code: `src/` (CLI wiring in `src/cli`, commands in `src/commands`, web provider in `src/provider-web.ts`, infra in `src/infra`, media pipeline in `src/media`).
-- Tests: colocated `*.test.ts`.
-- Docs: `docs/` (images, queue, Pi config). Built output lives in `dist/`.
+# Agent Guidelines — openclaw
 
-## Build, Test, and Development Commands
-- Install deps: `pnpm install`
-- Run CLI in dev: `pnpm clawdis ...` (tsx entry) or `pnpm dev` for `src/index.ts`.
-- Type-check/build: `pnpm build` (tsc)
-- Lint/format: `pnpm lint` (biome check), `pnpm format` (biome format)
-- Tests: `pnpm test` (vitest); coverage: `pnpm test:coverage`
+## Context
 
-## Coding Style & Naming Conventions
-- Language: TypeScript (ESM). Prefer strict typing; avoid `any`.
-- Formatting/linting via Biome; run `pnpm lint` before commits.
-- Keep files concise; extract helpers instead of “V2” copies. Use existing patterns for CLI options and dependency injection via `createDefaultDeps`.
-- Aim to keep files under ~700 LOC; guideline only (not a hard guardrail). Split/refactor when it improves clarity or testability.
+openclaw là DevOps-focused AI agent platform (fork của Clawdis) chạy trên Linux/Ubuntu.
+Khi làm việc với codebase này, đọc kỹ file này và `CLAUDE.md` trước khi thay đổi bất cứ thứ gì.
 
-## Testing Guidelines
-- Framework: Vitest with V8 coverage thresholds (70% lines/branches/functions/statements).
-- Naming: match source names with `*.test.ts`; e2e in `*.e2e.test.ts`.
-- Run `pnpm test` (or `pnpm test:coverage`) before pushing when you touch logic.
-- Pure test additions/fixes generally do **not** need a changelog entry unless they alter user-facing behavior or the user asks for one.
-- Mobile: before using a simulator, check for connected real devices (iOS + Android) and prefer them when available.
+## Platform & Environment
 
-## Commit & Pull Request Guidelines
-- Create commits with `scripts/committer "<msg>" <file...>`; avoid manual `git add`/`git commit` so staging stays scoped.
-- Follow concise, action-oriented commit messages (e.g., `CLI: add verbose flag to send`).
-- Group related changes; avoid bundling unrelated refactors.
-- PRs should summarize scope, note testing performed, and mention any user-facing changes or new flags.
+- **OS**: Linux (Ubuntu) — không có macOS, iOS, Swift, launchctl
+- **Gateway**: TypeScript WebSocket server, `systemctl --user restart clawdis-gateway.service`
+- **Surface**: Telegram only (không có WhatsApp, Discord, iMessage, WebChat)
+- **Build**: `pnpm build` (tsc); lint: `pnpm lint` (biome); test: `pnpm test` (vitest)
+- **PATH mặc định trong bash-tools**: `/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin` — **không có** `/opt/homebrew`
 
-## Security & Configuration Tips
-- Web provider stores creds at `~/.clawdis/credentials/`; rerun `clawdis login` if logged out.
-- Pi sessions live under `~/.clawdis/sessions/` by default; the base directory is not configurable.
-- Never commit or publish real phone numbers, videos, or live configuration values. Use obviously fake placeholders in docs, tests, and examples.
+## Coding Principles (theo thứ tự ưu tiên)
 
-## Agent-Specific Notes
-- Gateway currently runs only as the menubar app (launchctl shows `application.com.steipete.clawdis.debug.*`), there is no separate LaunchAgent/helper label installed. Restart via the Clawdis Mac app or `scripts/restart-mac.sh`; to verify/kill use `launchctl print gui/$UID | grep clawdis` rather than expecting `com.steipete.clawdis`. **When debugging on macOS, start/stop the gateway via the app, not ad-hoc tmux sessions; kill any temporary tunnels before handoff.**
-- macOS logs: use `./scripts/clawlog.sh` (aka `vtlog`) to query unified logs for subsystem `com.steipete.clawdis`; it supports follow/tail/category filters and expects passwordless sudo for `/usr/bin/log`.
-- Also read the shared guardrails at `~/Projects/oracle/AGENTS.md` and `~/Projects/agent-scripts/AGENTS.MD` before making changes; align with any cross-repo rules noted there.
-- SwiftUI state management (iOS/macOS): prefer the `Observation` framework (`@Observable`, `@Bindable`) over `ObservableObject`/`@StateObject`; don’t introduce new `ObservableObject` unless required for compatibility, and migrate existing usages when touching related code.
-- Connection providers: when adding a new connection, update every UI surface and docs (macOS app, web UI, mobile if applicable, onboarding/overview docs) and add matching status + configuration forms so provider lists and settings stay in sync.
-- **Restart apps:** “restart iOS/Android apps” means rebuild (recompile/install) and relaunch, not just kill/launch.
-- **Device checks:** before testing, verify connected real devices (iOS/Android) before reaching for simulators/emulators.
-- iOS Team ID lookup: `security find-identity -p codesigning -v` → use Apple Development (…) TEAMID. Fallback: `defaults read com.apple.dt.Xcode IDEProvisioningTeamIdentifiers`.
-- A2UI bundle hash: `src/canvas-host/a2ui/.bundle.hash` is auto-generated; regenerate via `pnpm canvas:a2ui:bundle` (or `scripts/bundle-a2ui.sh`) instead of manual conflict resolution.
-- Notary key file lives at `~/Library/CloudStorage/Dropbox/Backup/AppStore/AuthKey_NJF3NFGTS3.p8` (Sparkle keys live under `~/Library/CloudStorage/Dropbox/Backup/Sparkle`).
-- **Multi-agent safety:** do **not** create/apply/drop `git stash` entries unless Peter explicitly asks (this includes `git pull --rebase --autostash`). Assume other agents may be working; keep unrelated WIP untouched and avoid cross-cutting state changes.
-- **Multi-agent safety:** when Peter says "push", you may `git pull --rebase` to integrate latest changes (never discard other agents' work). When Peter says "commit", scope to your changes only. When Peter says "commit all", commit everything in grouped chunks.
-- **Multi-agent safety:** do **not** create/remove/modify `git worktree` checkouts (or edit `.worktrees/*`) unless Peter explicitly asks.
-- **Multi-agent safety:** do **not** switch branches / check out a different branch unless Peter explicitly asks.
-- **Multi-agent safety:** running multiple agents is OK as long as each agent has its own session.
-- When asked to open a “session” file, open the Pi session logs under `~/.clawdis/sessions/*.jsonl` (newest unless a specific ID is given), not the default `sessions.json`. If logs are needed from Mac Studio, SSH via Tailscale and read the same path there.
-- Menubar dimming + restart flow mirrors Trimmy: use `scripts/restart-mac.sh` (kills all Clawdis variants, runs `swift build`, packages, relaunches). Icon dimming depends on MenuBarExtraAccess wiring in AppMain; keep `appearsDisabled` updates intact when touching the status item.
-- Do not rebuild the macOS app over SSH; rebuilds must be run directly on the Mac.
-- Never send streaming/partial replies to external messaging surfaces (WhatsApp, Telegram); only final replies should be delivered there. Streaming/tool events may still go to internal UIs/control channel.
-- Voice wake forwarding tips:
-  - Command template should stay `clawdis-mac agent --message "${text}" --thinking low`; `VoiceWakeForwarder` already shell-escapes `${text}`. Don’t add extra quotes.
-  - launchd PATH is minimal; ensure the app’s launch agent sets PATH to include `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/steipete/Library/pnpm` so `pnpm`/`clawdis` binaries resolve when invoked via `clawdis-mac`.
-  - For manual `clawdis send` messages that include `!`, use the heredoc pattern noted below to avoid the Bash tool’s escaping.
+### 1. Không Spaghetti Code
 
-## Exclamation Mark Escaping Workaround
-The Claude Code Bash tool escapes `!` to `\\!` in command arguments. When using `clawdis send` with messages containing exclamation marks, use heredoc syntax:
+- **Mỗi file = một nhiệm vụ**: đừng mix state management + business logic + I/O trong cùng 1 file
+- **Extract khi > 700 LOC**: tách thành sub-modules có tên rõ ràng
+- **Không inline helpers** mà có thể tái sử dụng → đặt trong file riêng và import
 
-```bash
-# WRONG - will send "Hello\\!" with backslash
-clawdis send --to "+1234" --message 'Hello!'
+### 2. Pattern Đã Thiết Lập — Tuân Theo
 
-# CORRECT - use heredoc to avoid escaping
-clawdis send --to "+1234" --message "$(cat <<'EOF'
-Hello!
-EOF
-)"
+Codebase đã có sẵn các patterns; **dùng lại thay vì tạo mới**:
+
+| Nhu cầu                    | Dùng                                                   |
+| --------------------------- | ------------------------------------------------------- |
+| WS handler params (string)  | `readStringParam()` từ `agents/tool-params.ts`     |
+| Gateway port/URL constant   | `GATEWAY_DEFAULT_*` từ `gateway/constants.ts`      |
+| Telegram parse error regex  | `PARSE_ERR_RE` từ `telegram/constants.ts`          |
+| Tool descriptions in prompt | `TOOL_DESCRIPTIONS` trong `agents/system-prompt.ts` |
+| Gateway mutable state       | `GatewayContext` từ `gateway/gateway-context.ts`   |
+| OAuth storage               | `agents/pi-oauth-storage.ts`                          |
+| Model/auth resolution       | `agents/pi-model-resolver.ts`                         |
+| Usage tracking              | `gateway/usage-log.ts`                                |
+
+### 3. Handler Extraction Pattern
+
+WS switch-case handlers phải được extract sang `src/gateway/handlers/`:
+
+```typescript
+// Đúng — trong handlers/my-handlers.ts
+export async function handleMyAction(
+  params: Record<string, unknown>,
+  deps: SomeDeps,
+  respond: RespondFn,
+): Promise<void> { ... }
+
+// Sai — inline trong server.ts switch block
+case "my.action": { /* 50 lines of logic */ }
 ```
 
-This is a Claude Code quirk, not a clawdis bug.
+### 4. Type Safety
+
+- **Không dùng `@ts-nocheck`** — fix lỗi thực sự
+- Dùng inline structural types khi external package không re-export type (xem `TelegramMessage` trong `bot.ts`)
+- Overloads cho conditional return types (xem `readStringParam`)
+- `as Type` cast chỉ khi cần, kèm comment lý do
+
+### 5. Error Handling
+
+```typescript
+// Silent catch hợp lý (network/cleanup/best-effort)
+try { await bonjourStop(); } catch { /* ignore */ }
+
+// Warn khi ảnh hưởng user-facing behavior
+try { frontmatter = parseFrontmatter(raw); }
+catch (err) { console.warn(`[skills] failed to load "${name}": ${err}`); }
+
+// KHÔNG làm — silent catch che giấu lỗi quan trọng
+try { return await runCriticalOperation(); } catch { return null; }
+```
+
+### 6. Constants Không Hardcode
+
+```typescript
+// Đúng
+import { GATEWAY_DEFAULT_WS_URL } from "../gateway/constants.js";
+
+// Sai
+const url = "ws://127.0.0.1:18789";
+```
+
+## Files Quan Trọng
+
+### Gateway Layer
+
+- `src/gateway/server.ts` — main WS server (~5800 LOC, orchestrator)
+- `src/gateway/gateway-context.ts` — tất cả mutable state
+- `src/gateway/constants.ts` — GATEWAY_DEFAULT_PORT=18789, WS/HTTP URL
+- `src/gateway/handlers/` — cron, skills, usage handlers
+- `src/gateway/ws-logging.ts` — logWsWithMaps, shortId, formatForLog
+
+### Agent Runtime
+
+- `src/agents/pi-embedded-runner.ts` — orchestrator only (~370 LOC)
+- `src/agents/pi-model-resolver.ts` — resolveModel, getApiKeyForModel
+- `src/agents/pi-oauth-storage.ts` — OAuth credential management
+- `src/agents/pi-embedded-subscribe.ts` — session event subscription (443 LOC, tight coupling — giữ nguyên)
+- `src/agents/tool-params.ts` — readStringParam, readStringArrayParam
+- `src/agents/system-prompt.ts` — buildAgentSystemPromptAppend() với dynamic tooling
+- `src/agents/bash-tools.ts` — bash/process tools
+
+### Telegram
+
+- `src/telegram/bot.ts` — createTelegramBot, deliverTextReply/deliverMediaReply
+- `src/telegram/constants.ts` — PARSE_ERR_RE, TEXT_CHUNK_LIMIT
+- `src/telegram/send.ts` — sendMessageTelegram
+- `src/telegram/proxy.ts` — makeProxyFetch
+
+### Memory & Storage
+
+- `src/memory/sqlite.ts` — SQLite memory substrate (BM25 + vector recall)
+- `src/gateway/usage-log.ts` — token usage JSONL log
+
+## System Prompt Identity
+
+Agent identity là **"openclaw"** — không phải "Clawd" hay "Clawdis".
+Khi sửa `buildAgentSystemPromptAppend()`, giữ nguyên:
+
+- `activeTools` param → dynamic tooling section
+- `TOOL_DESCRIPTIONS` map → canonical descriptions
+- Identity string "openclaw"
+
+## Những Thứ Đã Bị Xóa (đừng thêm lại)
+
+- macOS/iOS: `src/macos/`, `src/imessage/`, Swift code
+- Signal, Discord, WhatsApp, WebChat providers
+- Web UI (`ui/` Vite app)
+- macOS-only skills: apple-notes, peekaboo, camsnap, spotify-player, v.v.
+- Hardcoded `/opt/homebrew/bin` trong PATH
+
+## Reset Workspace
+
+Script `scripts/reset-workspace.sh` — dùng khi cần reset agent state. Templates nằm ở `docs/templates/`.
+
+| Mode | Tác dụng |
+|------|----------|
+| `--conversations` | Xóa sessions + usage log + media. Giữ identity, memory, cron. |
+| `--soft` | Overwrite AGENTS/SOUL/TOOLS từ template. Giữ identity + memory + `~/.clawdis/`. |
+| `--full` | Factory reset. Require gõ `yes`. Giữ `clawdis.json`, `credentials/`, `skills/`. |
+
+**Những gì KHÔNG bị xóa trong mọi mode:**
+- `~/.clawdis/clawdis.json` — provider config, API keys
+- `~/.clawdis/credentials/oauth.json` — OAuth tokens
+- `~/.clawdis/skills/` — installed skills
+
+**Flow dev khi sửa templates:**
+```bash
+vim docs/templates/TOOLS.md       # sửa template
+./scripts/reset-workspace.sh --soft   # áp dụng lên workspace
+systemctl --user restart clawdis-gateway.service
+```
+
+**Flow test bootstrap từ đầu:**
+```bash
+./scripts/reset-workspace.sh --full   # factory reset (gõ 'yes' để confirm)
+systemctl --user restart clawdis-gateway.service
+# Chat với agent qua Telegram → nó sẽ thấy BOOTSTRAP.md và bắt đầu ritual
+```
+
+## Checklist Trước Khi Submit
+
+- [ ] `pnpm build` passes (không có TS errors)
+- [ ] `pnpm lint` passes (không có biome warnings)
+- [ ] Không có `@ts-nocheck` mới
+- [ ] Constants dùng từ `constants.ts`, không hardcode
+- [ ] Handler extraction đúng pattern nếu thêm WS handler mới
+- [ ] `activeTools` được truyền nếu gọi `buildAgentSystemPromptAppend()`
+- [ ] Silent catches có comment lý do hoặc warn nếu cần

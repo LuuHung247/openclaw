@@ -229,8 +229,20 @@ function settingsPage() {
       this.defaultModelSaving = true;
       try {
         await OpenFangAPI.post('/api/config', { agent: { model: this.defaultModel } });
+        // Patch all active sessions to use the new model immediately
+        var model = this.defaultModel;
+        try {
+          var res = await OpenFangAPI.getSessions();
+          var sessions = (res && res.sessions) || [];
+          await Promise.all(sessions.map(function(s) {
+            var key = s.session_key || s.agent_id || s.session_id;
+            if (!key) return Promise.resolve();
+            return OpenFangAPI.request('sessions.patch', { key: key, modelOverride: model }).catch(function() {});
+          }));
+        } catch(e2) { /* non-critical — config already saved */ }
         // Reload config to confirm persisted value and sync UI state
         await this.loadConfig();
+        window.dispatchEvent(new CustomEvent('openclaw:model-changed', { detail: { model: this.defaultModel } }));
         OpenFangToast.success('Default model saved: ' + this.defaultModel);
       } catch(e) {
         OpenFangToast.error('Failed to save model: ' + e.message);

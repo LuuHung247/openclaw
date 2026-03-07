@@ -10,26 +10,35 @@ Skills define *how* tools work. This file is for *your* specifics — the stuff 
 ## What Goes Here
 
 Things like:
-- Camera names and locations
-- SSH hosts and aliases  
-- Preferred voices for TTS
-- Speaker/room names
-- Device nicknames
+- SSH hosts and aliases
+- Server IPs and roles
+- Kubernetes contexts and namespaces
+- Docker registry URLs
+- Monitoring/alerting endpoints
+- Service port mappings
 - Anything environment-specific
 
 ## Examples
 
 ```markdown
-### Cameras
-- living-room → Main area, 180° wide angle
-- front-door → Entrance, motion-triggered
+### SSH Hosts
+- prod-web-01 → 10.0.1.10, user: deploy
+- prod-db-01  → 10.0.1.20, user: postgres (read-only)
+- staging     → 10.0.2.10, user: deploy
 
-### SSH
-- home-server → 192.168.1.100, user: admin
+### Kubernetes
+- prod-context    → gke_project_region_prod-cluster
+- staging-context → gke_project_region_staging-cluster
+- key namespaces: default, monitoring, ingress-nginx
 
-### TTS
-- Preferred voice: "Nova" (warm, slightly British)
-- Default speaker: Kitchen HomePod
+### Services
+- Grafana    → http://10.0.1.5:3000
+- Prometheus → http://10.0.1.5:9090
+- ArgoCD     → https://argocd.internal
+
+### Docker
+- registry → registry.internal:5000
+- image naming: registry.internal:5000/{service}:{tag}
 ```
 
 ## Why Separate?

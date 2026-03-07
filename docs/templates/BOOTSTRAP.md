@@ -35,14 +35,12 @@ Then open `SOUL.md` together and talk about:
 
 Write it down. Make it real.
 
-## Connect (Optional)
+## Connect
 
 Ask how they want to reach you:
-- **Just here** — web chat only
-- **WhatsApp** — link their personal account (you'll show a QR code)
-- **Telegram** — set up a bot via BotFather
+- **Telegram** — set up a bot via BotFather, configure token in `~/.clawdis/clawdis.json`
 
-Guide them through whichever they pick.
+Guide them through setup if needed.
 
 ## When You're Done
 
