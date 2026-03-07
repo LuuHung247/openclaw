@@ -146,6 +146,7 @@ import {
   type HookMappingResolved,
   resolveHookMappings,
 } from "./hooks-mapping.js";
+import { GATEWAY_DEFAULT_PORT } from "./constants.js";
 
 ensureClawdisCliOnPath();
 
@@ -381,14 +382,55 @@ import {
   validateWebLoginStartParams,
   validateWebLoginWaitParams,
 } from "./protocol/index.js";
-import { DEFAULT_WS_SLOW_MS, getGatewayWsLogStyle } from "./ws-logging.js";
+import {
+  DEFAULT_WS_SLOW_MS,
+  getGatewayWsLogStyle,
+  logWsWithMaps,
+  formatForLog,
+  shortId,
+  type WsLogInflightMaps,
+} from "./ws-logging.js";
+import {
+  handleCronList,
+  handleCronStatus,
+  handleCronAdd,
+  handleCronUpdate,
+  handleCronRemove,
+  handleCronRun,
+  handleCronRuns,
+} from "./handlers/cron-handlers.js";
+import {
+  handleSkillsStatus,
+  handleSkillsInstall,
+  handleSkillsUpdate,
+  handleSkillsUninstall,
+  handleSkillsClawHubInstall,
+} from "./handlers/skills-handlers.js";
+import {
+  handleUsageSummary,
+  handleUsageByModel,
+  handleUsageByAgent,
+  handleUsageDaily,
+} from "./handlers/usage-handlers.js";
+import {
+  USAGE_LOG_PATH,
+  type UsageLogEntry,
+  appendUsageEvent,
+  readUsageLog,
+} from "./usage-log.js";
+import {
+  GatewayContext,
+  type Client,
+  type DedupeEntry,
+  type WsInflightEntry,
+  type ChatAbortEntry,
+  type ChatRunEntry,
+  type AuditEntry,
+  type TelegramRuntime,
+} from "./gateway-context.js";
 
-type Client = {
-  socket: WebSocket;
-  connect: ConnectParams;
-  connId: string;
-  presenceKey?: string;
-};
+// Re-export Client so external callers (tests, etc.) don't break.
+export type { Client };
 
 function formatBonjourInstanceName(displayName: string) {
   const trimmed = displayName.trim();
@@ -452,40 +494,8 @@ type SessionsPatchResult = {
   entry: SessionEntry;
 };
 
-// ── Usage log (JSONL, one record per agent run) ─────────────────────────────
-const USAGE_LOG_PATH = path.join(CONFIG_DIR, "usage-log.jsonl");
-
-type UsageLogEntry = {
-  ts: string;       // ISO date string
-  date: string;     // YYYY-MM-DD
-  sessionKey: string;
-  model: string;
-  input_tokens: number;
-  output_tokens: number;
-  cost_usd: number;
-  tool_calls: number;
-  duration_ms?: number;
-};
-
-function appendUsageEvent(entry: UsageLogEntry): void {
-  try {
-    fs.appendFileSync(USAGE_LOG_PATH, JSON.stringify(entry) + "\n", "utf-8");
-  } catch {
-    // non-fatal — analytics log failure should not break normal operation
-  }
-}
-
-function readUsageLog(): UsageLogEntry[] {
-  try {
-    if (!fs.existsSync(USAGE_LOG_PATH)) return [];
-    const lines = fs.readFileSync(USAGE_LOG_PATH, "utf-8").split("\n").filter(Boolean);
-    return lines.map((l) => {
-      try { return JSON.parse(l) as UsageLogEntry; } catch { return null; }
-    }).filter(Boolean) as UsageLogEntry[];
-  } catch {
-    return [];
-  }
-}
+// Usage log — USAGE_LOG_PATH, UsageLogEntry, appendUsageEvent, readUsageLog
+// are now imported from ./usage-log.ts above.
 
 const METHODS = [
   "health",
@@ -611,13 +621,19 @@ function isLoopbackHost(host: string): boolean {
   return isLoopbackAddress(host);
 }
 
-let presenceVersion = 1;
-let healthVersion = 1;
-let healthCache: HealthSummary | null = null;
-let healthRefresh: Promise<HealthSummary> | null = null;
-let broadcastHealthUpdate: ((snap: HealthSummary) => void) | null = null;
+// Module-level GatewayContext singleton — created once per process.
+// Handlers inside startGatewayServer() access this via the `ctx` local alias.
+const _ctx = new GatewayContext();
 
-function buildSnapshot(): Snapshot {
+// WS log inflight maps adapter — bridges GatewayContext maps to ws-logging API.
+const _wsLogMaps: WsLogInflightMaps = {
+  since: _ctx.wsInflightSince,
+  compact: _ctx.wsInflightCompact,
+  optimized: _ctx.wsInflightOptimized,
+  lastCompactConnId: { value: _ctx.wsLastCompactConnId },
+};
+
+function buildSnapshot(ctx: GatewayContext): Snapshot {
   const presence = listSystemPresence();
   const uptimeMs = Math.round(process.uptime() * 1000);
   // Health is async; caller should await getHealthSnapshot and replace later if needed.
@@ -625,7 +641,7 @@ function buildSnapshot(): Snapshot {
   return {
     presence,
     health: emptyHealth,
-    stateVersion: { presence: presenceVersion, health: healthVersion },
+    stateVersion: { presence: ctx.presenceVersion, health: ctx.healthVersion },
     uptimeMs,
     // Surface resolved paths so UIs can display the true config location.
     configPath: CONFIG_PATH_CLAWDIS,
@@ -642,62 +658,8 @@ const TICK_INTERVAL_MS = 30_000;
 const HEALTH_REFRESH_INTERVAL_MS = 60_000;
 const DEDUPE_TTL_MS = 5 * 60_000;
 const DEDUPE_MAX = 1000;
-const LOG_VALUE_LIMIT = 240;
-
-type DedupeEntry = {
-  ts: number;
-  ok: boolean;
-  payload?: unknown;
-  error?: ErrorShape;
-};
-
-function formatForLog(value: unknown): string {
-  try {
-    if (value instanceof Error) {
-      const parts: string[] = [];
-      if (value.name) parts.push(value.name);
-      if (value.message) parts.push(value.message);
-      const code =
-        "code" in value &&
-          (typeof value.code === "string" || typeof value.code === "number")
-          ? String(value.code)
-          : "";
-      if (code) parts.push(`code=${code}`);
-      const combined = parts.filter(Boolean).join(": ").trim();
-      if (combined) {
-        return combined.length > LOG_VALUE_LIMIT
-          ? `${combined.slice(0, LOG_VALUE_LIMIT)}...`
-          : combined;
-      }
-    }
-    if (value && typeof value === "object") {
-      const rec = value as Record<string, unknown>;
-      if (typeof rec.message === "string" && rec.message.trim()) {
-        const name = typeof rec.name === "string" ? rec.name.trim() : "";
-        const code =
-          typeof rec.code === "string" || typeof rec.code === "number"
-            ? String(rec.code)
-            : "";
-        const parts = [name, rec.message.trim()].filter(Boolean);
-        if (code) parts.push(`code=${code}`);
-        const combined = parts.join(": ").trim();
-        return combined.length > LOG_VALUE_LIMIT
-          ? `${combined.slice(0, LOG_VALUE_LIMIT)}...`
-          : combined;
-      }
-    }
-    const str =
-      typeof value === "string" || typeof value === "number"
-        ? String(value)
-        : JSON.stringify(value);
-    if (!str) return "";
-    return str.length > LOG_VALUE_LIMIT
-      ? `${str.slice(0, LOG_VALUE_LIMIT)}...`
-      : str;
-  } catch {
-    return String(value);
-  }
-}
+// DedupeEntry is defined in gateway-context.ts
+// formatForLog, shortId — imported from ./ws-logging.ts
 
 function compactPreview(input: string, maxLen = 160): string {
   const oneLine = input.replace(/\s+/g, " ").trim();
@@ -997,281 +959,15 @@ function listSessionsFromStore(params: {
   };
 }
 
+// WS logging — delegated to ws-logging.ts unified logWsWithMaps.
+// _wsLogMaps bridges GatewayContext maps to the logging API.
 function logWs(
   direction: "in" | "out",
   kind: string,
   meta?: Record<string, unknown>,
 ) {
-  const style = getGatewayWsLogStyle();
-  if (!isVerbose()) {
-    logWsOptimized(direction, kind, meta);
-    return;
-  }
-
-  if (style === "compact" || style === "auto") {
-    logWsCompact(direction, kind, meta);
-    return;
-  }
-
-  const now = Date.now();
-  const connId = typeof meta?.connId === "string" ? meta.connId : undefined;
-  const id = typeof meta?.id === "string" ? meta.id : undefined;
-  const method = typeof meta?.method === "string" ? meta.method : undefined;
-  const ok = typeof meta?.ok === "boolean" ? meta.ok : undefined;
-  const event = typeof meta?.event === "string" ? meta.event : undefined;
-
-  const inflightKey = connId && id ? `${connId}:${id}` : undefined;
-  if (direction === "in" && kind === "req" && inflightKey) {
-    wsInflightSince.set(inflightKey, now);
-  }
-  const durationMs =
-    direction === "out" && kind === "res" && inflightKey
-      ? (() => {
-        const startedAt = wsInflightSince.get(inflightKey);
-        if (startedAt === undefined) return undefined;
-        wsInflightSince.delete(inflightKey);
-        return now - startedAt;
-      })()
-      : undefined;
-
-  const dirArrow = direction === "in" ? "←" : "→";
-  const dirColor = direction === "in" ? chalk.greenBright : chalk.cyanBright;
-  const prefix = `${chalk.gray("[gws]")} ${dirColor(dirArrow)} ${chalk.bold(kind)}`;
-
-  const headline =
-    (kind === "req" || kind === "res") && method
-      ? chalk.bold(method)
-      : kind === "event" && event
-        ? chalk.bold(event)
-        : undefined;
-
-  const statusToken =
-    kind === "res" && ok !== undefined
-      ? ok
-        ? chalk.greenBright("✓")
-        : chalk.redBright("✗")
-      : undefined;
-
-  const durationToken =
-    typeof durationMs === "number" ? chalk.dim(`${durationMs}ms`) : undefined;
-
-  const restMeta: string[] = [];
-  if (meta) {
-    for (const [key, value] of Object.entries(meta)) {
-      if (value === undefined) continue;
-      if (key === "connId" || key === "id") continue;
-      if (key === "method" || key === "ok") continue;
-      if (key === "event") continue;
-      restMeta.push(`${chalk.dim(key)}=${formatForLog(value)}`);
-    }
-  }
-
-  const trailing: string[] = [];
-  if (connId) {
-    trailing.push(`${chalk.dim("conn")}=${chalk.gray(shortId(connId))}`);
-  }
-  if (id) trailing.push(`${chalk.dim("id")}=${chalk.gray(shortId(id))}`);
-
-  const tokens = [
-    prefix,
-    statusToken,
-    headline,
-    durationToken,
-    ...restMeta,
-    ...trailing,
-  ].filter((t): t is string => Boolean(t));
-
-  console.log(tokens.join(" "));
+  logWsWithMaps(_wsLogMaps, direction, kind, meta, isVerbose());
 }
-
-type WsInflightEntry = {
-  ts: number;
-  method?: string;
-  meta?: Record<string, unknown>;
-};
-
-const wsInflightCompact = new Map<string, WsInflightEntry>();
-let wsLastCompactConnId: string | undefined;
-const wsInflightOptimized = new Map<string, number>();
-
-function logWsOptimized(
-  direction: "in" | "out",
-  kind: string,
-  meta?: Record<string, unknown>,
-) {
-  // Keep "normal" mode quiet: only surface errors, slow calls, and parser issues.
-  const connId = typeof meta?.connId === "string" ? meta.connId : undefined;
-  const id = typeof meta?.id === "string" ? meta.id : undefined;
-  const ok = typeof meta?.ok === "boolean" ? meta.ok : undefined;
-  const method = typeof meta?.method === "string" ? meta.method : undefined;
-
-  const inflightKey = connId && id ? `${connId}:${id}` : undefined;
-
-  if (direction === "in" && kind === "req" && inflightKey) {
-    wsInflightOptimized.set(inflightKey, Date.now());
-    if (wsInflightOptimized.size > 2000) wsInflightOptimized.clear();
-    return;
-  }
-
-  if (kind === "parse-error") {
-    const errorMsg =
-      typeof meta?.error === "string" ? formatForLog(meta.error) : undefined;
-    console.log(
-      [
-        `${chalk.gray("[gws]")} ${chalk.redBright("✗")} ${chalk.bold("parse-error")}`,
-        errorMsg ? `${chalk.dim("error")}=${errorMsg}` : undefined,
-        `${chalk.dim("conn")}=${chalk.gray(shortId(connId ?? "?"))}`,
-      ]
-        .filter((t): t is string => Boolean(t))
-        .join(" "),
-    );
-    return;
-  }
-
-  if (direction !== "out" || kind !== "res") return;
-
-  const startedAt = inflightKey
-    ? wsInflightOptimized.get(inflightKey)
-    : undefined;
-  if (inflightKey) wsInflightOptimized.delete(inflightKey);
-  const durationMs =
-    typeof startedAt === "number" ? Date.now() - startedAt : undefined;
-
-  const shouldLog =
-    ok === false ||
-    (typeof durationMs === "number" && durationMs >= DEFAULT_WS_SLOW_MS);
-  if (!shouldLog) return;
-
-  const statusToken =
-    ok === undefined
-      ? undefined
-      : ok
-        ? chalk.greenBright("✓")
-        : chalk.redBright("✗");
-  const durationToken =
-    typeof durationMs === "number" ? chalk.dim(`${durationMs}ms`) : undefined;
-
-  const restMeta: string[] = [];
-  if (meta) {
-    for (const [key, value] of Object.entries(meta)) {
-      if (value === undefined) continue;
-      if (key === "connId" || key === "id") continue;
-      if (key === "method" || key === "ok") continue;
-      restMeta.push(`${chalk.dim(key)}=${formatForLog(value)}`);
-    }
-  }
-
-  const tokens = [
-    `${chalk.gray("[gws]")} ${chalk.yellowBright("⇄")} ${chalk.bold("res")}`,
-    statusToken,
-    method ? chalk.bold(method) : undefined,
-    durationToken,
-    ...restMeta,
-    connId ? `${chalk.dim("conn")}=${chalk.gray(shortId(connId))}` : undefined,
-    id ? `${chalk.dim("id")}=${chalk.gray(shortId(id))}` : undefined,
-  ].filter((t): t is string => Boolean(t));
-
-  console.log(tokens.join(" "));
-}
-
-function logWsCompact(
-  direction: "in" | "out",
-  kind: string,
-  meta?: Record<string, unknown>,
-) {
-  const now = Date.now();
-  const connId = typeof meta?.connId === "string" ? meta.connId : undefined;
-  const id = typeof meta?.id === "string" ? meta.id : undefined;
-  const method = typeof meta?.method === "string" ? meta.method : undefined;
-  const ok = typeof meta?.ok === "boolean" ? meta.ok : undefined;
-  const inflightKey = connId && id ? `${connId}:${id}` : undefined;
-
-  // Pair req/res into a single line (printed on response).
-  if (kind === "req" && direction === "in" && inflightKey) {
-    wsInflightCompact.set(inflightKey, { ts: now, method, meta });
-    return;
-  }
-
-  const compactArrow = (() => {
-    if (kind === "req" || kind === "res") return "⇄";
-    return direction === "in" ? "←" : "→";
-  })();
-  const arrowColor =
-    kind === "req" || kind === "res"
-      ? chalk.yellowBright
-      : direction === "in"
-        ? chalk.greenBright
-        : chalk.cyanBright;
-
-  const prefix = `${chalk.gray("[gws]")} ${arrowColor(compactArrow)} ${chalk.bold(kind)}`;
-
-  const statusToken =
-    kind === "res" && ok !== undefined
-      ? ok
-        ? chalk.greenBright("✓")
-        : chalk.redBright("✗")
-      : undefined;
-
-  const startedAt =
-    kind === "res" && direction === "out" && inflightKey
-      ? wsInflightCompact.get(inflightKey)?.ts
-      : undefined;
-  if (kind === "res" && direction === "out" && inflightKey) {
-    wsInflightCompact.delete(inflightKey);
-  }
-  const durationToken =
-    typeof startedAt === "number"
-      ? chalk.dim(`${now - startedAt}ms`)
-      : undefined;
-
-  const headline =
-    (kind === "req" || kind === "res") && method
-      ? chalk.bold(method)
-      : kind === "event" && typeof meta?.event === "string"
-        ? chalk.bold(meta.event)
-        : undefined;
-
-  const restMeta: string[] = [];
-  if (meta) {
-    for (const [key, value] of Object.entries(meta)) {
-      if (value === undefined) continue;
-      if (key === "connId" || key === "id") continue;
-      if (key === "method" || key === "ok") continue;
-      if (key === "event") continue;
-      restMeta.push(`${chalk.dim(key)}=${formatForLog(value)}`);
-    }
-  }
-
-  const trailing: string[] = [];
-  if (connId && connId !== wsLastCompactConnId) {
-    trailing.push(`${chalk.dim("conn")}=${chalk.gray(shortId(connId))}`);
-    wsLastCompactConnId = connId;
-  }
-  if (id) trailing.push(`${chalk.dim("id")}=${chalk.gray(shortId(id))}`);
-
-  const tokens = [
-    prefix,
-    statusToken,
-    headline,
-    durationToken,
-    ...restMeta,
-    ...trailing,
-  ].filter((t): t is string => Boolean(t));
-
-  console.log(tokens.join(" "));
-}
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function shortId(value: string): string {
-  const s = value.trim();
-  if (UUID_RE.test(s)) return `${s.slice(0, 8)}…${s.slice(-4)}`;
-  if (s.length <= 24) return s;
-  return `${s.slice(0, 12)}…${s.slice(-4)}`;
-}
-
-const wsInflightSince = new Map<string, number>();
 
 function formatError(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -1291,27 +987,32 @@ function formatError(err: unknown): string {
   return JSON.stringify(err, null, 2);
 }
 
-async function refreshHealthSnapshot(_opts?: { probe?: boolean }) {
-  if (!healthRefresh) {
-    healthRefresh = (async () => {
+async function refreshHealthSnapshot(
+  ctx: GatewayContext,
+  _opts?: { probe?: boolean },
+) {
+  if (!ctx.healthRefresh) {
+    ctx.healthRefresh = (async () => {
       const snap = await getHealthSnapshot(undefined);
-      healthCache = snap;
-      healthVersion += 1;
-      if (broadcastHealthUpdate) {
-        broadcastHealthUpdate(snap);
+      ctx.healthCache = snap;
+      ctx.healthVersion += 1;
+      if (ctx.broadcastHealthUpdate) {
+        ctx.broadcastHealthUpdate(snap);
       }
       return snap;
     })().finally(() => {
-      healthRefresh = null;
+      ctx.healthRefresh = null;
     });
   }
-  return healthRefresh;
+  return ctx.healthRefresh;
 }
 
 export async function startGatewayServer(
-  port = 18789,
+  port = GATEWAY_DEFAULT_PORT,
   opts: GatewayServerOptions = {},
 ): Promise<GatewayServer> {
+  // Use the module-level context singleton (reset on process restart).
+  const ctx = _ctx;
   const configSnapshot = await readConfigFileSnapshot();
   if (configSnapshot.legacyIssues.length > 0) {
     if (isNixMode) {
@@ -1698,32 +1399,11 @@ export async function startGatewayServer(
     return true;
   };
 
-  // ── In-memory audit log ring buffer (for SSE /api/logs/stream) ──
-  const auditLog: Array<{
-    seq: number;
-    timestamp: string;
-    action: string;
-    detail: string;
-    agent_id: string | null;
-  }> = [];
-  let auditSeq = 0;
-  const SSE_CLIENTS = new Set<import("node:http").ServerResponse>();
-
-  function appendAudit(action: string, detail: string, agentId?: string | null) {
-    const entry = {
-      seq: ++auditSeq,
-      timestamp: new Date().toISOString(),
-      action,
-      detail: detail ?? "",
-      agent_id: agentId ?? null,
-    };
-    auditLog.push(entry);
-    if (auditLog.length > 500) auditLog.splice(0, auditLog.length - 500);
-    const data = "data: " + JSON.stringify(entry) + "\n\n";
-    for (const client of SSE_CLIENTS) {
-      try { client.write(data); } catch { SSE_CLIENTS.delete(client); }
-    }
-  }
+  // ── In-memory audit log ring buffer — delegated to ctx ──
+  const appendAudit = (action: string, detail: string, agentId?: string | null) =>
+    ctx.appendAudit(action, detail, agentId);
+  const auditLog = ctx.auditLog;
+  const SSE_CLIENTS = ctx.sseClients;
 
   // ── SSE + audit REST handler ──
   const handleAuditRequest = (
@@ -1873,8 +1553,8 @@ export async function startGatewayServer(
   });
   let bonjourStop: (() => Promise<void>) | null = null;
   let bridge: Awaited<ReturnType<typeof startNodeBridgeServer>> | null = null;
-  const bridgeNodeSubscriptions = new Map<string, Set<string>>();
-  const bridgeSessionSubscribers = new Map<string, Set<string>>();
+  const bridgeNodeSubscriptions = ctx.bridgeNodeSubscriptions;
+  const bridgeSessionSubscribers = ctx.bridgeSessionSubscribers;
 
   const isMobilePlatform = (platform: unknown): boolean => {
     const p = typeof platform === "string" ? platform.trim().toLowerCase() : "";
@@ -1925,69 +1605,19 @@ export async function startGatewayServer(
       wss.emit("connection", ws, req);
     });
   });
-  let telegramAbort: AbortController | null = null;
-  let telegramTask: Promise<unknown> | null = null;
-  let telegramStarting = false;
-  let telegramRuntime: {
-    running: boolean;
-    lastStartAt?: number | null;
-    lastStopAt?: number | null;
-    lastError?: string | null;
-    mode?: "webhook" | "polling" | null;
-  } = {
-    running: false,
-    lastStartAt: null,
-    lastStopAt: null,
-    lastError: null,
-    mode: null,
-  };
-  const clients = new Set<Client>();
-  let seq = 0;
-  // Track per-run sequence to detect out-of-order/lost agent events.
-  const agentRunSeq = new Map<string, number>();
-  const dedupe = new Map<string, DedupeEntry>();
-  // Map agent runId -> pending chat runs for WebChat clients.
-  const chatRunSessions = new Map<
-    string,
-    Array<{ sessionKey: string; clientRunId: string }>
-  >();
-  const addChatRun = (
-    sessionId: string,
-    entry: { sessionKey: string; clientRunId: string },
-  ) => {
-    const queue = chatRunSessions.get(sessionId);
-    if (queue) {
-      queue.push(entry);
-    } else {
-      chatRunSessions.set(sessionId, [entry]);
-    }
-  };
-  const peekChatRun = (sessionId: string) =>
-    chatRunSessions.get(sessionId)?.[0];
-  const shiftChatRun = (sessionId: string) => {
-    const queue = chatRunSessions.get(sessionId);
-    if (!queue || queue.length === 0) return undefined;
-    const entry = queue.shift();
-    if (!queue.length) chatRunSessions.delete(sessionId);
-    return entry;
-  };
-  const removeChatRun = (
-    sessionId: string,
-    clientRunId: string,
-    sessionKey?: string,
-  ) => {
-    const queue = chatRunSessions.get(sessionId);
-    if (!queue || queue.length === 0) return undefined;
-    const idx = queue.findIndex(
-      (entry) =>
-        entry.clientRunId === clientRunId &&
-        (sessionKey ? entry.sessionKey === sessionKey : true),
-    );
-    if (idx < 0) return undefined;
-    const [entry] = queue.splice(idx, 1);
-    if (!queue.length) chatRunSessions.delete(sessionId);
-    return entry;
-  };
+  // ── Telegram provider state — delegated to ctx ──────────────────────────
+
+  const clients = ctx.clients;
+  // seq is a plain number — keep local ref, sync to ctx on write.
+  // Use ctx.seq directly throughout (search replaced below).
+  const agentRunSeq = ctx.agentRunSeq;
+  const dedupe = ctx.dedupe;
+  // Chat run helpers delegated to ctx
+  const chatRunSessions = ctx.chatRunSessions;
+  const addChatRun = ctx.addChatRun.bind(ctx);
+  const peekChatRun = ctx.peekChatRun.bind(ctx);
+  const shiftChatRun = ctx.shiftChatRun.bind(ctx);
+  const removeChatRun = ctx.removeChatRun.bind(ctx);
   const resolveSessionKeyForRun = (runId: string) => {
     const cached = getAgentRunContext(runId)?.sessionKey;
     if (cached) return cached;
@@ -2003,13 +1633,9 @@ export async function startGatewayServer(
     }
     return sessionKey;
   };
-  const chatRunBuffers = new Map<string, string>();
-
-  const chatDeltaSentAt = new Map<string, number>();
-  const chatAbortControllers = new Map<
-    string,
-    { controller: AbortController; sessionId: string; sessionKey: string }
-  >();
+  const chatRunBuffers = ctx.chatRunBuffers;
+  const chatDeltaSentAt = ctx.chatDeltaSentAt;
+  const chatAbortControllers = ctx.chatAbortControllers;
   setCommandLaneConcurrency("cron", cfgAtStart.cron?.maxConcurrentRuns ?? 1);
   setCommandLaneConcurrency("main", cfgAtStart.agent?.maxConcurrent ?? 1);
 
@@ -2067,13 +1693,13 @@ export async function startGatewayServer(
 
 
   const startTelegramProvider = async () => {
-    if (telegramTask || telegramStarting) return;
-    telegramStarting = true;
+    if (ctx.telegramTask || ctx.telegramStarting) return;
+    ctx.telegramStarting = true;
     try {
       const cfg = loadConfig();
       if (cfg.telegram?.enabled === false) {
-        telegramRuntime = {
-          ...telegramRuntime,
+        ctx.telegramRuntime = {
+          ...ctx.telegramRuntime,
           running: false,
           lastError: "disabled",
         };
@@ -2088,8 +1714,8 @@ export async function startGatewayServer(
         logMissingFile: (message) => logTelegram.warn(message),
       });
       if (!telegramToken.trim()) {
-        telegramRuntime = {
-          ...telegramRuntime,
+        ctx.telegramRuntime = {
+          ...ctx.telegramRuntime,
           running: false,
           lastError: "not configured",
         };
@@ -2118,9 +1744,9 @@ export async function startGatewayServer(
       logTelegram.info(
         `starting provider${telegramBotLabel}${cfg.telegram ? "" : " (no telegram config; token via env)"}`,
       );
-      telegramAbort = new AbortController();
-      telegramRuntime = {
-        ...telegramRuntime,
+      ctx.telegramAbort = new AbortController();
+      ctx.telegramRuntime = {
+        ...ctx.telegramRuntime,
         running: true,
         lastStartAt: Date.now(),
         lastError: null,
@@ -2129,46 +1755,46 @@ export async function startGatewayServer(
       const task = monitorTelegramProvider({
         token: telegramToken.trim(),
         runtime: telegramRuntimeEnv,
-        abortSignal: telegramAbort.signal,
+        abortSignal: ctx.telegramAbort.signal,
         useWebhook: Boolean(cfg.telegram?.webhookUrl),
         webhookUrl: cfg.telegram?.webhookUrl,
         webhookSecret: cfg.telegram?.webhookSecret,
         webhookPath: cfg.telegram?.webhookPath,
       })
         .catch((err) => {
-          telegramRuntime = {
-            ...telegramRuntime,
+          ctx.telegramRuntime = {
+            ...ctx.telegramRuntime,
             lastError: formatError(err),
           };
           logTelegram.error(`provider exited: ${formatError(err)}`);
         })
         .finally(() => {
-          telegramAbort = null;
-          telegramTask = null;
-          telegramRuntime = {
-            ...telegramRuntime,
+          ctx.telegramAbort = null;
+          ctx.telegramTask = null;
+          ctx.telegramRuntime = {
+            ...ctx.telegramRuntime,
             running: false,
             lastStopAt: Date.now(),
           };
         });
-      telegramTask = task;
+      ctx.telegramTask = task;
     } finally {
-      telegramStarting = false;
+      ctx.telegramStarting = false;
     }
   };
 
   const stopTelegramProvider = async () => {
-    if (!telegramAbort && !telegramTask) return;
-    telegramAbort?.abort();
+    if (!ctx.telegramAbort && !ctx.telegramTask) return;
+    ctx.telegramAbort?.abort();
     try {
-      await telegramTask;
+      await ctx.telegramTask;
     } catch {
       // ignore
     }
-    telegramAbort = null;
-    telegramTask = null;
-    telegramRuntime = {
-      ...telegramRuntime,
+    ctx.telegramAbort = null;
+    ctx.telegramTask = null;
+    ctx.telegramRuntime = {
+      ...ctx.telegramRuntime,
       running: false,
       lastStopAt: Date.now(),
     };
@@ -2187,7 +1813,7 @@ export async function startGatewayServer(
       stateVersion?: { presence?: number; health?: number };
     },
   ) => {
-    const eventSeq = ++seq;
+    const eventSeq = ++ctx.seq;
     const frame = JSON.stringify({
       type: "event",
       event,
@@ -2420,11 +2046,11 @@ export async function startGatewayServer(
         }
         case "health": {
           const now = Date.now();
-          const cached = healthCache;
+          const cached = ctx.healthCache;
           if (cached && now - cached.ts < HEALTH_REFRESH_INTERVAL_MS) {
             return { ok: true, payloadJSON: JSON.stringify(cached) };
           }
-          const snap = await refreshHealthSnapshot({ probe: false });
+          const snap = await refreshHealthSnapshot(ctx, { probe: false });
           return { ok: true, payloadJSON: JSON.stringify(snap) };
         }
         case "config.get": {
@@ -3380,15 +3006,15 @@ export async function startGatewayServer(
             instanceId: node.nodeId,
             text,
           });
-          presenceVersion += 1;
+          ctx.presenceVersion += 1;
           broadcast(
             "presence",
             { presence: listSystemPresence() },
             {
               dropIfSlow: true,
               stateVersion: {
-                presence: presenceVersion,
-                health: healthVersion,
+                presence: ctx.presenceVersion,
+                health: ctx.healthVersion,
               },
             },
           );
@@ -3426,15 +3052,15 @@ export async function startGatewayServer(
             instanceId: node.nodeId,
             text,
           });
-          presenceVersion += 1;
+          ctx.presenceVersion += 1;
           broadcast(
             "presence",
             { presence: listSystemPresence() },
             {
               dropIfSlow: true,
               stateVersion: {
-                presence: presenceVersion,
-                health: healthVersion,
+                presence: ctx.presenceVersion,
+                health: ctx.healthVersion,
               },
             },
           );
@@ -3507,9 +3133,9 @@ export async function startGatewayServer(
     }
   }
 
-  broadcastHealthUpdate = (snap: HealthSummary) => {
+  ctx.broadcastHealthUpdate = (snap: HealthSummary) => {
     broadcast("health", snap, {
-      stateVersion: { presence: presenceVersion, health: healthVersion },
+      stateVersion: { presence: ctx.presenceVersion, health: ctx.healthVersion },
     });
     bridgeSendToAllSubscribed("health", snap);
   };
@@ -3523,13 +3149,13 @@ export async function startGatewayServer(
 
   // periodic health refresh to keep cached snapshot warm
   const healthInterval = setInterval(() => {
-    void refreshHealthSnapshot({ probe: true }).catch((err) =>
+    void refreshHealthSnapshot(ctx, { probe: true }).catch((err) =>
       logHealth.error(`refresh failed: ${formatError(err)}`),
     );
   }, HEALTH_REFRESH_INTERVAL_MS);
 
   // Prime cache so first client gets a snapshot without waiting.
-  void refreshHealthSnapshot({ probe: true }).catch((err) =>
+  void refreshHealthSnapshot(ctx, { probe: true }).catch((err) =>
     logHealth.error(`initial refresh failed: ${formatError(err)}`),
   );
 
@@ -3815,13 +3441,13 @@ export async function startGatewayServer(
         upsertPresence(client.presenceKey, {
           reason: "disconnect",
         });
-        presenceVersion += 1;
+        ctx.presenceVersion += 1;
         broadcast(
           "presence",
           { presence: listSystemPresence() },
           {
             dropIfSlow: true,
-            stateVersion: { presence: presenceVersion, health: healthVersion },
+            stateVersion: { presence: ctx.presenceVersion, health: ctx.healthVersion },
           },
         );
       }
@@ -3961,13 +3587,13 @@ export async function startGatewayServer(
               instanceId: connectParams.client.instanceId,
               reason: "connect",
             });
-            presenceVersion += 1;
+            ctx.presenceVersion += 1;
           }
 
-          const snapshot = buildSnapshot();
-          if (healthCache) {
-            snapshot.health = healthCache;
-            snapshot.stateVersion.health = healthVersion;
+          const snapshot = buildSnapshot(ctx);
+          if (ctx.healthCache) {
+            snapshot.health = ctx.healthCache;
+            snapshot.stateVersion.health = ctx.healthVersion;
           }
           const helloOk = {
             type: "hello-ok",
@@ -4004,7 +3630,7 @@ export async function startGatewayServer(
           send({ type: "res", id: frame.id, ok: true, payload: helloOk });
 
           clients.add(client);
-          void refreshHealthSnapshot({ probe: true }).catch((err) =>
+          void refreshHealthSnapshot(ctx, { probe: true }).catch((err) =>
             logHealth.error(
               `post-connect health refresh failed: ${formatError(err)}`,
             ),
@@ -4104,10 +3730,10 @@ export async function startGatewayServer(
             }
             case "health": {
               const now = Date.now();
-              const cached = healthCache;
+              const cached = ctx.healthCache;
               if (cached && now - cached.ts < HEALTH_REFRESH_INTERVAL_MS) {
                 respond(true, cached, undefined, { cached: true });
-                void refreshHealthSnapshot({ probe: false }).catch((err) =>
+                void refreshHealthSnapshot(ctx, { probe: false }).catch((err) =>
                   logHealth.error(
                     `background health refresh failed: ${formatError(err)}`,
                   ),
@@ -4115,7 +3741,7 @@ export async function startGatewayServer(
                 break;
               }
               try {
-                const snap = await refreshHealthSnapshot({ probe: false });
+                const snap = await refreshHealthSnapshot(ctx, { probe: false });
                 respond(true, snap, undefined);
               } catch (err) {
                 respond(
@@ -4172,11 +3798,11 @@ export async function startGatewayServer(
                   telegram: {
                     configured: telegramEnabled && Boolean(telegramToken),
                     tokenSource,
-                    running: telegramRuntime.running,
-                    mode: telegramRuntime.mode ?? null,
-                    lastStartAt: telegramRuntime.lastStartAt ?? null,
-                    lastStopAt: telegramRuntime.lastStopAt ?? null,
-                    lastError: telegramRuntime.lastError ?? null,
+                    running: ctx.telegramRuntime.running,
+                    mode: ctx.telegramRuntime.mode ?? null,
+                    lastStartAt: ctx.telegramRuntime.lastStartAt ?? null,
+                    lastStopAt: ctx.telegramRuntime.lastStopAt ?? null,
+                    lastError: ctx.telegramRuntime.lastError ?? null,
                     probe: telegramProbe,
                     lastProbeAt,
                   },
@@ -4476,142 +4102,31 @@ export async function startGatewayServer(
               break;
             }
             case "cron.list": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (!validateCronListParams(params)) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    `invalid cron.list params: ${formatValidationErrors(validateCronListParams.errors)}`,
-                  ),
-                );
-                break;
-              }
-              const p = params as { includeDisabled?: boolean };
-              const jobs = await cron.list({
-                includeDisabled: p.includeDisabled,
-              });
-              respond(true, { jobs }, undefined);
+              await handleCronList((req.params ?? {}) as Record<string, unknown>, cron, respond);
               break;
             }
             case "cron.status": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (!validateCronStatusParams(params)) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    `invalid cron.status params: ${formatValidationErrors(validateCronStatusParams.errors)}`,
-                  ),
-                );
-                break;
-              }
-              const status = await cron.status();
-              respond(true, status, undefined);
+              await handleCronStatus((req.params ?? {}) as Record<string, unknown>, cron, respond);
               break;
             }
             case "cron.add": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (!validateCronAddParams(params)) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    `invalid cron.add params: ${formatValidationErrors(validateCronAddParams.errors)}`,
-                  ),
-                );
-                break;
-              }
-              const job = await cron.add(params as unknown as CronJobCreate);
-              respond(true, job, undefined);
+              await handleCronAdd((req.params ?? {}) as Record<string, unknown>, cron, respond);
               break;
             }
             case "cron.update": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (!validateCronUpdateParams(params)) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    `invalid cron.update params: ${formatValidationErrors(validateCronUpdateParams.errors)}`,
-                  ),
-                );
-                break;
-              }
-              const p = params as {
-                id: string;
-                patch: Record<string, unknown>;
-              };
-              const job = await cron.update(
-                p.id,
-                p.patch as unknown as CronJobPatch,
-              );
-              respond(true, job, undefined);
+              await handleCronUpdate((req.params ?? {}) as Record<string, unknown>, cron, respond);
               break;
             }
             case "cron.remove": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (!validateCronRemoveParams(params)) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    `invalid cron.remove params: ${formatValidationErrors(validateCronRemoveParams.errors)}`,
-                  ),
-                );
-                break;
-              }
-              const p = params as { id: string };
-              const result = await cron.remove(p.id);
-              respond(true, result, undefined);
+              await handleCronRemove((req.params ?? {}) as Record<string, unknown>, cron, respond);
               break;
             }
             case "cron.run": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (!validateCronRunParams(params)) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    `invalid cron.run params: ${formatValidationErrors(validateCronRunParams.errors)}`,
-                  ),
-                );
-                break;
-              }
-              const p = params as { id: string; mode?: "due" | "force" };
-              const result = await cron.run(p.id, p.mode);
-              respond(true, result, undefined);
+              await handleCronRun((req.params ?? {}) as Record<string, unknown>, cron, respond);
               break;
             }
             case "cron.runs": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (!validateCronRunsParams(params)) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    `invalid cron.runs params: ${formatValidationErrors(validateCronRunsParams.errors)}`,
-                  ),
-                );
-                break;
-              }
-              const p = params as { id: string; limit?: number };
-              const logPath = resolveCronRunLogPath({
-                storePath: cronStorePath,
-                jobId: p.id,
-              });
-              const entries = await readCronRunLogEntries(logPath, {
-                limit: p.limit,
-                jobId: p.id,
-              });
-              respond(true, { entries }, undefined);
+              await handleCronRuns((req.params ?? {}) as Record<string, unknown>, cronStorePath, respond);
               break;
             }
             case "status": {
@@ -4805,295 +4320,31 @@ export async function startGatewayServer(
               break;
             }
             case "skills.status": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (!validateSkillsStatusParams(params)) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    `invalid skills.status params: ${formatValidationErrors(validateSkillsStatusParams.errors)}`,
-                  ),
-                );
-                break;
-              }
-              const cfg = loadConfig();
-              const workspaceDirRaw =
-                cfg.agent?.workspace ?? DEFAULT_AGENT_WORKSPACE_DIR;
-              const workspaceDir = resolveUserPath(workspaceDirRaw);
-              const report = buildWorkspaceSkillStatus(workspaceDir, {
-                config: cfg,
-              });
-              respond(true, report, undefined);
+              await handleSkillsStatus((req.params ?? {}) as Record<string, unknown>, respond);
               break;
             }
             case "skills.install": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (!validateSkillsInstallParams(params)) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    `invalid skills.install params: ${formatValidationErrors(validateSkillsInstallParams.errors)}`,
-                  ),
-                );
-                break;
-              }
-              const p = params as {
-                name: string;
-                installId: string;
-                timeoutMs?: number;
-              };
-              const cfg = loadConfig();
-              const workspaceDirRaw =
-                cfg.agent?.workspace ?? DEFAULT_AGENT_WORKSPACE_DIR;
-              const result = await installSkill({
-                workspaceDir: workspaceDirRaw,
-                skillName: p.name,
-                installId: p.installId,
-                timeoutMs: p.timeoutMs,
-                config: cfg,
-              });
-              respond(
-                result.ok,
-                result,
-                result.ok
-                  ? undefined
-                  : errorShape(ErrorCodes.UNAVAILABLE, result.message),
-              );
+              await handleSkillsInstall((req.params ?? {}) as Record<string, unknown>, respond);
               break;
             }
             case "skills.update": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (!validateSkillsUpdateParams(params)) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    `invalid skills.update params: ${formatValidationErrors(validateSkillsUpdateParams.errors)}`,
-                  ),
-                );
-                break;
-              }
-              const p = params as {
-                skillKey: string;
-                enabled?: boolean;
-                apiKey?: string;
-                env?: Record<string, string>;
-              };
-              const cfg = loadConfig();
-              const skills = cfg.skills ? { ...cfg.skills } : {};
-              const entries = skills.entries ? { ...skills.entries } : {};
-              const current = entries[p.skillKey]
-                ? { ...entries[p.skillKey] }
-                : {};
-              if (typeof p.enabled === "boolean") {
-                current.enabled = p.enabled;
-              }
-              if (typeof p.apiKey === "string") {
-                const trimmed = p.apiKey.trim();
-                if (trimmed) current.apiKey = trimmed;
-                else delete current.apiKey;
-              }
-              if (p.env && typeof p.env === "object") {
-                const nextEnv = current.env ? { ...current.env } : {};
-                for (const [key, value] of Object.entries(p.env)) {
-                  const trimmedKey = key.trim();
-                  if (!trimmedKey) continue;
-                  const trimmedVal = value.trim();
-                  if (!trimmedVal) delete nextEnv[trimmedKey];
-                  else nextEnv[trimmedKey] = trimmedVal;
-                }
-                current.env = nextEnv;
-              }
-              entries[p.skillKey] = current;
-              skills.entries = entries;
-              const nextConfig: ClawdisConfig = {
-                ...cfg,
-                skills,
-              };
-              await writeConfigFile(nextConfig);
-              respond(
-                true,
-                { ok: true, skillKey: p.skillKey, config: current },
-                undefined,
-              );
+              await handleSkillsUpdate((req.params ?? {}) as Record<string, unknown>, respond);
               break;
             }
             case "skills.uninstall": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              if (typeof params.skillKey !== "string" || !params.skillKey.trim()) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.INVALID_REQUEST,
-                    "skills.uninstall requires skillKey parameter"
-                  ),
-                );
-                break;
-              }
-              const skillKey = params.skillKey.trim();
-              const cfg = loadConfig();
-              const workspaceDirRaw =
-                cfg.agent?.workspace ?? DEFAULT_AGENT_WORKSPACE_DIR;
-              const workspaceDir = resolveUserPath(workspaceDirRaw);
-
-              try {
-                // Find skill's baseDir via status report (covers all skill dirs)
-                const report = buildWorkspaceSkillStatus(workspaceDir, { config: cfg });
-                const skillEntry = report.skills.find(
-                  (s) => s.skillKey === skillKey || s.name === skillKey
-                );
-
-                if (!skillEntry) {
-                  respond(
-                    false,
-                    undefined,
-                    errorShape(ErrorCodes.UNAVAILABLE, `Skill "${skillKey}" not found`)
-                  );
-                  break;
-                }
-
-                // Bundled skills (source === "clawdis-bundled") cannot be deleted from disk.
-                // Disable them via config instead.
-                if (skillEntry.source === "clawdis-bundled") {
-                  const skills = cfg.skills ? { ...cfg.skills } : {};
-                  const entries = skills.entries ? { ...skills.entries } : {};
-                  entries[skillKey] = { ...entries[skillKey], enabled: false };
-                  skills.entries = entries;
-                  await writeConfigFile({ ...cfg, skills });
-                  respond(true, { ok: true, skillKey, action: "disabled" }, undefined);
-                  break;
-                }
-
-                // For user-installed skills: delete the directory
-                const skillPath = skillEntry.baseDir;
-                if (skillPath && fs.existsSync(skillPath)) {
-                  fs.rmSync(skillPath, { recursive: true, force: true });
-                }
-
-                // Remove from config entries
-                const skills = cfg.skills ? { ...cfg.skills } : {};
-                const entries = skills.entries ? { ...skills.entries } : {};
-                delete entries[skillKey];
-                skills.entries = entries;
-                await writeConfigFile({ ...cfg, skills });
-
-                respond(true, { ok: true, skillKey, action: "deleted" }, undefined);
-              } catch (err) {
-                respond(
-                  false,
-                  undefined,
-                  errorShape(
-                    ErrorCodes.UNAVAILABLE,
-                    `Failed to uninstall skill: ${formatError(err)}`
-                  ),
-                );
-              }
+              await handleSkillsUninstall((req.params ?? {}) as Record<string, unknown>, respond);
               break;
             }
             case "skills.clawhub-install": {
-              const params = (req.params ?? {}) as Record<string, unknown>;
-              const slug = typeof params.slug === "string" ? params.slug.trim() : "";
-              if (!slug) {
-                respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "slug required"));
-                break;
-              }
-              try {
-                // Download SKILL.md from ClawHub
-                const skillMdUrl = `https://clawhub.ai/api/v1/skills/${encodeURIComponent(slug)}/file?path=SKILL.md`;
-                const res = await fetch(skillMdUrl);
-                if (!res.ok) {
-                  respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `ClawHub returned ${res.status}`));
-                  break;
-                }
-                const skillMd = await res.text();
-                if (!skillMd.trim()) {
-                  respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "Empty SKILL.md from ClawHub"));
-                  break;
-                }
-                // Save to ~/.clawdis/skills/<slug>/SKILL.md
-                const skillDir = path.join(CONFIG_DIR, "skills", slug);
-                fs.mkdirSync(skillDir, { recursive: true });
-                fs.writeFileSync(path.join(skillDir, "SKILL.md"), skillMd, "utf-8");
-                broadcast("skills.installed", { name: slug });
-                respond(true, { ok: true, name: slug }, undefined);
-              } catch (err) {
-                respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Install failed: ${formatError(err)}`));
-              }
+              await handleSkillsClawHubInstall((req.params ?? {}) as Record<string, unknown>, respond, broadcast);
               break;
             }
 
             // ── Usage analytics ────────────────────────────────────────────
-            case "usage.summary": {
-              const log = readUsageLog();
-              let totalIn = 0, totalOut = 0, totalCost = 0, totalTools = 0;
-              for (const e of log) {
-                totalIn += e.input_tokens;
-                totalOut += e.output_tokens;
-                totalCost += e.cost_usd;
-                totalTools += e.tool_calls;
-              }
-              respond(true, {
-                total_input_tokens: totalIn,
-                total_output_tokens: totalOut,
-                total_cost_usd: totalCost,
-                call_count: log.length,
-                total_tool_calls: totalTools,
-              }, undefined);
-              break;
-            }
-            case "usage.by-model": {
-              const log = readUsageLog();
-              const byModel: Record<string, { total_input_tokens: number; total_output_tokens: number; total_cost_usd: number; call_count: number }> = {};
-              for (const e of log) {
-                if (!byModel[e.model]) byModel[e.model] = { total_input_tokens: 0, total_output_tokens: 0, total_cost_usd: 0, call_count: 0 };
-                byModel[e.model].total_input_tokens += e.input_tokens;
-                byModel[e.model].total_output_tokens += e.output_tokens;
-                byModel[e.model].total_cost_usd += e.cost_usd;
-                byModel[e.model].call_count += 1;
-              }
-              const models = Object.entries(byModel)
-                .map(([model, stats]) => ({ model, ...stats }))
-                .sort((a, b) => b.total_cost_usd - a.total_cost_usd);
-              respond(true, { models }, undefined);
-              break;
-            }
-            case "usage.by-agent": {
-              const log = readUsageLog();
-              const byAgent: Record<string, { total_tokens: number; cost_usd: number; tool_calls: number; model: string; call_count: number }> = {};
-              for (const e of log) {
-                if (!byAgent[e.sessionKey]) byAgent[e.sessionKey] = { total_tokens: 0, cost_usd: 0, tool_calls: 0, model: e.model, call_count: 0 };
-                byAgent[e.sessionKey].total_tokens += e.input_tokens + e.output_tokens;
-                byAgent[e.sessionKey].cost_usd += e.cost_usd;
-                byAgent[e.sessionKey].tool_calls += e.tool_calls;
-                byAgent[e.sessionKey].call_count += 1;
-                if (e.model && e.model !== "unknown") byAgent[e.sessionKey].model = e.model;
-              }
-              const agents = Object.entries(byAgent).map(([agent_id, stats]) => ({ agent_id, agent_name: agent_id, ...stats }));
-              respond(true, { agents }, undefined);
-              break;
-            }
-            case "usage.daily": {
-              const log = readUsageLog();
-              const byDay: Record<string, { cost_usd: number; tokens: number; calls: number }> = {};
-              for (const e of log) {
-                if (!byDay[e.date]) byDay[e.date] = { cost_usd: 0, tokens: 0, calls: 0 };
-                byDay[e.date].cost_usd += e.cost_usd;
-                byDay[e.date].tokens += e.input_tokens + e.output_tokens;
-                byDay[e.date].calls += 1;
-              }
-              const today = new Date().toISOString().slice(0, 10);
-              const days = Object.entries(byDay)
-                .sort(([a], [b]) => a.localeCompare(b))
-                .map(([date, stats]) => ({ date, ...stats }));
-              const firstEventDate = days.length > 0 ? days[0].date : null;
-              respond(true, { days, today_cost_usd: byDay[today]?.cost_usd ?? 0, first_event_date: firstEventDate }, undefined);
-              break;
-            }
+            case "usage.summary": { handleUsageSummary(respond); break; }
+            case "usage.by-model": { handleUsageByModel(respond); break; }
+            case "usage.by-agent": { handleUsageByAgent(respond); break; }
+            case "usage.daily": { handleUsageDaily(respond); break; }
 
             case "sessions.list": {
               const params = (req.params ?? {}) as Record<string, unknown>;
@@ -5565,15 +4816,15 @@ export async function startGatewayServer(
               } else {
                 enqueueSystemEvent(text);
               }
-              presenceVersion += 1;
+              ctx.presenceVersion += 1;
               broadcast(
                 "presence",
                 { presence: listSystemPresence() },
                 {
                   dropIfSlow: true,
                   stateVersion: {
-                    presence: presenceVersion,
-                    health: healthVersion,
+                    presence: ctx.presenceVersion,
+                    health: ctx.healthVersion,
                   },
                 },
               );
@@ -6542,7 +5793,7 @@ export async function startGatewayServer(
         await stopBrowserControlServerIfStarted().catch(() => { });
       }
       await Promise.allSettled(
-        [telegramTask].filter(
+        [ctx.telegramTask].filter(
           Boolean,
         ) as Array<Promise<unknown>>,
       );

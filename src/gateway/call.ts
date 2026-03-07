@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { loadConfig } from "../config/config.js";
 import { GatewayClient } from "./client.js";
+import { GATEWAY_DEFAULT_WS_URL } from "./constants.js";
 import { PROTOCOL_VERSION } from "./protocol/index.js";
 
 export type CallGatewayOptions = {
@@ -35,7 +36,7 @@ export async function callGateway<T = unknown>(
     (typeof remote?.url === "string" && remote.url.trim().length > 0
       ? remote.url.trim()
       : undefined) ||
-    "ws://127.0.0.1:18789";
+    GATEWAY_DEFAULT_WS_URL;
   const token =
     (typeof opts.token === "string" && opts.token.trim().length > 0
       ? opts.token.trim()

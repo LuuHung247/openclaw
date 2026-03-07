@@ -42,13 +42,14 @@ import {
 import { parseDurationMs } from "../cli/parse-duration.js";
 import { loadConfig } from "../config/config.js";
 import { callGateway } from "../gateway/call.js";
+import { GATEWAY_DEFAULT_WS_URL } from "../gateway/constants.js";
 import { detectMime, imageMimeFromFormat } from "../media/mime.js";
 import { sanitizeToolResultImages } from "./tool-images.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: TypeBox schema type from pi-agent-core uses a different module instance.
 type AnyAgentTool = AgentTool<any, unknown>;
 
-const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
+const DEFAULT_GATEWAY_URL = GATEWAY_DEFAULT_WS_URL;
 
 type GatewayCallOptions = {
   gatewayUrl?: string;

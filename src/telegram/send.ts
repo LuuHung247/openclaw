@@ -1,8 +1,8 @@
-// @ts-nocheck
 import { Bot, InputFile } from "grammy";
 import { formatErrorMessage } from "../infra/errors.js";
 import { mediaKindFromMime } from "../media/constants.js";
 import { loadWebMedia } from "../media/fetch.js";
+import { PARSE_ERR_RE } from "./constants.js";
 
 type TelegramSendOpts = {
   token?: string;
@@ -16,9 +16,6 @@ type TelegramSendResult = {
   messageId: string;
   chatId: string;
 };
-
-const PARSE_ERR_RE =
-  /can't parse entities|parse entities|find end of the entity/i;
 
 function resolveToken(explicit?: string): string {
   const token = explicit ?? process.env.TELEGRAM_BOT_TOKEN;
@@ -64,7 +61,8 @@ export async function sendMessageTelegram(
   const token = resolveToken(opts.token);
   const chatId = normalizeChatId(to);
   const bot = opts.api ? null : new Bot(token);
-  const api = opts.api ?? bot?.api;
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const api = opts.api ?? bot!.api;
   const mediaUrl = opts.mediaUrl?.trim();
 
   const sleep = (ms: number) =>
@@ -194,4 +192,3 @@ function inferFilename(kind: ReturnType<typeof mediaKindFromMime>) {
       return "file.bin";
   }
 }
-// @ts-nocheck

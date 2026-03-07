@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { rawDataToString } from "../infra/ws.js";
 import { logDebug, logError } from "../logger.js";
+import { GATEWAY_DEFAULT_WS_URL } from "./constants.js";
 import {
   type ConnectParams,
   type EventFrame,
@@ -52,7 +53,7 @@ export class GatewayClient {
 
   start() {
     if (this.closed) return;
-    const url = this.opts.url ?? "ws://127.0.0.1:18789";
+    const url = this.opts.url ?? GATEWAY_DEFAULT_WS_URL;
     // Allow node screen snapshots and other large responses.
     this.ws = new WebSocket(url, { maxPayload: 25 * 1024 * 1024 });
 

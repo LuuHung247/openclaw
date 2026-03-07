@@ -35,8 +35,7 @@ const DEFAULT_MAX_OUTPUT = clampNumber(
   150_000,
 );
 const DEFAULT_SHELL_PATH = "/bin/sh";
-const DEFAULT_PATH =
-  "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+const DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 const DEFAULT_PTY_NAME = "xterm-256color";
 
 type PtyModule = typeof import("node-pty");

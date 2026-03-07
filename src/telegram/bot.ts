@@ -1,8 +1,7 @@
-// @ts-nocheck
 import { Buffer } from "node:buffer";
 
 import { apiThrottler } from "@grammyjs/transformer-throttler";
-import type { ApiClientOptions, Message } from "grammy";
+import type { ApiClientOptions } from "grammy";
 import { Bot, InputFile, webhookCallback } from "grammy";
 
 import { chunkText, resolveTextChunkLimit } from "../auto-reply/chunk.js";
@@ -20,11 +19,33 @@ import { detectMime } from "../media/mime.js";
 import { saveMediaBuffer } from "../media/store.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { loadWebMedia } from "../media/fetch.js";
+import { PARSE_ERR_RE } from "./constants.js";
 
-const PARSE_ERR_RE =
-  /can't parse entities|parse entities|find end of the entity/i;
-
-type TelegramMessage = Message.CommonMessage;
+// Minimal structural type covering the fields used in this module.
+// grammy v1.39 no longer re-exports the `Message` namespace from its main entry.
+type TelegramUser = {
+  id?: number;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+};
+type TelegramMessageEntity = { type: string; offset: number; length: number };
+type TelegramMessage = {
+  message_id: number;
+  date: number;
+  chat: { id: number; type: string; title?: string };
+  from?: TelegramUser;
+  text?: string;
+  caption?: string;
+  entities?: TelegramMessageEntity[];
+  caption_entities?: TelegramMessageEntity[];
+  photo?: Array<{ file_id: string }>;
+  video?: { file_id: string };
+  document?: { file_id: string };
+  audio?: { file_id: string };
+  voice?: { file_id: string };
+  reply_to_message?: TelegramMessage;
+};
 
 type TelegramContext = {
   message: TelegramMessage;
@@ -270,9 +291,9 @@ async function deliverReplies(params: {
   runtime: RuntimeEnv;
   bot: Bot;
   replyToMode: ReplyToMode;
-  textLimit: number;
+  textLimit?: number;
 }) {
-  const { replies, chatId, runtime, bot, replyToMode, textLimit } = params;
+  const { replies, chatId, runtime, bot, replyToMode, textLimit = 4096 } = params;
   let hasReplied = false;
   for (const reply of replies) {
     if (!reply?.text && !reply?.mediaUrl && !(reply?.mediaUrls?.length ?? 0)) {

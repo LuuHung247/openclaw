@@ -4,6 +4,7 @@ import type {
   ClawdisConfig,
   HooksGmailTailscaleMode,
 } from "../config/config.js";
+import { GATEWAY_DEFAULT_HTTP_URL } from "../gateway/constants.js";
 
 export const DEFAULT_GMAIL_LABEL = "INBOX";
 export const DEFAULT_GMAIL_TOPIC = "gog-gmail-watch";
@@ -14,7 +15,7 @@ export const DEFAULT_GMAIL_SERVE_PATH = "/gmail-pubsub";
 export const DEFAULT_GMAIL_MAX_BYTES = 20_000;
 export const DEFAULT_GMAIL_RENEW_MINUTES = 12 * 60;
 export const DEFAULT_HOOKS_PATH = "/hooks";
-export const DEFAULT_HOOKS_BASE_URL = "http://127.0.0.1:18789";
+export const DEFAULT_HOOKS_BASE_URL = GATEWAY_DEFAULT_HTTP_URL;
 
 export type GmailHookOverrides = {
   account?: string;

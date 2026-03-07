@@ -1,26 +1,13 @@
-import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
-import path from "node:path";
 
 import type { AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
-import {
-  type Api,
-  type AssistantMessage,
-  getEnvApiKey,
-  getOAuthApiKey,
-  type Model,
-  type OAuthCredentials,
-  type OAuthProvider,
-} from "@mariozechner/pi-ai";
+import type { AssistantMessage } from "@mariozechner/pi-ai";
 import {
   buildSystemPrompt,
   createAgentSession,
-  discoverAuthStorage,
-  discoverModels,
   SessionManager,
   SettingsManager,
-  type Skill,
 } from "@mariozechner/pi-coding-agent";
 import { getMemorySubstrate } from "../memory/sqlite.js";
 import type { ThinkLevel, VerboseLevel } from "../auto-reply/thinking.js";
@@ -32,7 +19,7 @@ import {
   type enqueueCommand,
   enqueueCommandInLane,
 } from "../process/command-queue.js";
-import { CONFIG_DIR, resolveUserPath } from "../utils.js";
+import { resolveUserPath } from "../utils.js";
 import { resolveClawdisAgentDir } from "./agent-paths.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
 import { ensureClawdisModelsJson } from "./models-config.js";
@@ -44,13 +31,13 @@ import {
 } from "./pi-embedded-helpers.js";
 import { subscribeEmbeddedPiSession } from "./pi-embedded-subscribe.js";
 import { extractAssistantText } from "./pi-embedded-utils.js";
+import { getApiKeyForModel, resolveModel, resolvePromptSkills } from "./pi-model-resolver.js";
 import { createClawdisCodingTools } from "./pi-tools.js";
 import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
   buildWorkspaceSkillSnapshot,
   loadWorkspaceSkillEntries,
-  type SkillEntry,
   type SkillSnapshot,
 } from "./skills.js";
 import { buildAgentSystemPromptAppend } from "./system-prompt.js";
@@ -93,12 +80,6 @@ type EmbeddedPiQueueHandle = {
 
 const ACTIVE_EMBEDDED_RUNS = new Map<string, EmbeddedPiQueueHandle>();
 
-const OAUTH_FILENAME = "oauth.json";
-const DEFAULT_OAUTH_DIR = path.join(CONFIG_DIR, "credentials");
-let oauthStorageConfigured = false;
-
-type OAuthStorage = Record<string, OAuthCredentials>;
-
 function resolveSessionLane(key: string) {
   const cleaned = key.trim() || "main";
   return cleaned.startsWith("session:") ? cleaned : `session:${cleaned}`;
@@ -109,90 +90,9 @@ function resolveGlobalLane(lane?: string) {
   return cleaned ? cleaned : "main";
 }
 
-function resolveClawdisOAuthPath(): string {
-  const overrideDir =
-    process.env.CLAWDIS_OAUTH_DIR?.trim() || DEFAULT_OAUTH_DIR;
-  return path.join(resolveUserPath(overrideDir), OAUTH_FILENAME);
-}
-
-function loadOAuthStorageAt(pathname: string): OAuthStorage | null {
-  if (!fsSync.existsSync(pathname)) return null;
-  try {
-    const content = fsSync.readFileSync(pathname, "utf8");
-    const json = JSON.parse(content) as OAuthStorage;
-    if (!json || typeof json !== "object") return null;
-    return json;
-  } catch {
-    return null;
-  }
-}
-
-function hasAnthropicOAuth(storage: OAuthStorage): boolean {
-  const entry = storage.anthropic as
-    | {
-      refresh?: string;
-      refresh_token?: string;
-      refreshToken?: string;
-      access?: string;
-      access_token?: string;
-      accessToken?: string;
-    }
-    | undefined;
-  if (!entry) return false;
-  const refresh =
-    entry.refresh ?? entry.refresh_token ?? entry.refreshToken ?? "";
-  const access = entry.access ?? entry.access_token ?? entry.accessToken ?? "";
-  return Boolean(refresh.trim() && access.trim());
-}
-
-function saveOAuthStorageAt(pathname: string, storage: OAuthStorage): void {
-  const dir = path.dirname(pathname);
-  fsSync.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  fsSync.writeFileSync(
-    pathname,
-    `${JSON.stringify(storage, null, 2)}\n`,
-    "utf8",
-  );
-  fsSync.chmodSync(pathname, 0o600);
-}
-
-function legacyOAuthPaths(): string[] {
-  const paths: string[] = [];
-  const piOverride = process.env.PI_CODING_AGENT_DIR?.trim();
-  if (piOverride) {
-    paths.push(path.join(resolveUserPath(piOverride), OAUTH_FILENAME));
-  }
-  paths.push(path.join(os.homedir(), ".pi", "agent", OAUTH_FILENAME));
-  paths.push(path.join(os.homedir(), ".claude", OAUTH_FILENAME));
-  paths.push(path.join(os.homedir(), ".config", "claude", OAUTH_FILENAME));
-  paths.push(path.join(os.homedir(), ".config", "anthropic", OAUTH_FILENAME));
-  return Array.from(new Set(paths));
-}
-
-function importLegacyOAuthIfNeeded(destPath: string): void {
-  if (fsSync.existsSync(destPath)) return;
-  for (const legacyPath of legacyOAuthPaths()) {
-    const storage = loadOAuthStorageAt(legacyPath);
-    if (!storage || !hasAnthropicOAuth(storage)) continue;
-    saveOAuthStorageAt(destPath, storage);
-    return;
-  }
-}
-
-function ensureOAuthStorage(): void {
-  if (oauthStorageConfigured) return;
-  oauthStorageConfigured = true;
-  const oauthPath = resolveClawdisOAuthPath();
-  importLegacyOAuthIfNeeded(oauthPath);
-}
-
-function isOAuthProvider(provider: string): provider is OAuthProvider {
-  return (
-    provider === "anthropic" ||
-    provider === "github-copilot" ||
-    provider === "google-gemini-cli" ||
-    provider === "google-antigravity"
-  );
+function mapThinkingLevel(level?: ThinkLevel): ThinkingLevel {
+  if (!level) return "off";
+  return level;
 }
 
 export function queueEmbeddedPiMessage(
@@ -225,106 +125,6 @@ export function isEmbeddedPiRunStreaming(sessionId: string): boolean {
 
 export function resolveEmbeddedSessionLane(key: string) {
   return resolveSessionLane(key);
-}
-
-function mapThinkingLevel(level?: ThinkLevel): ThinkingLevel {
-  // pi-agent-core supports "xhigh" too; Clawdis doesn't surface it for now.
-  if (!level) return "off";
-  return level;
-}
-
-// Map from our canonical provider IDs (config/UI) to Pi SDK's internal IDs.
-// Must stay in sync with the same map in model-catalog.ts.
-const PROVIDER_TO_PISDK: Record<string, string> = {
-  gemini: "google",
-};
-
-function resolveModel(
-  provider: string,
-  modelId: string,
-  agentDir?: string,
-  cfg?: ClawdisConfig,
-): {
-  model?: Model<Api>;
-  error?: string;
-  authStorage: ReturnType<typeof discoverAuthStorage>;
-  modelRegistry: ReturnType<typeof discoverModels>;
-} {
-  const resolvedAgentDir = agentDir ?? resolveClawdisAgentDir();
-  const authStorage = discoverAuthStorage(resolvedAgentDir);
-
-  // Bridge API keys for built-in providers that differ between our IDs and Pi SDK IDs.
-  const cfgProviders = cfg?.models?.providers ?? {};
-  for (const [ourId, sdkId] of Object.entries(PROVIDER_TO_PISDK)) {
-    const key = (cfgProviders[ourId] as { apiKey?: string } | undefined)?.apiKey?.trim();
-    if (key) {
-      authStorage.set(sdkId, { type: "api_key", key });
-    }
-  }
-
-  // Translate our provider ID to Pi SDK's internal ID before lookup.
-  const sdkProvider = PROVIDER_TO_PISDK[provider] ?? provider;
-  const modelRegistry = discoverModels(authStorage, resolvedAgentDir);
-  const model = modelRegistry.find(sdkProvider, modelId) as Model<Api> | null;
-  if (!model) {
-    return {
-      error: `Unknown model: ${provider}/${modelId}`,
-      authStorage,
-      modelRegistry,
-    };
-  }
-  return { model, authStorage, modelRegistry };
-}
-
-async function getApiKeyForModel(
-  model: Model<Api>,
-  authStorage: ReturnType<typeof discoverAuthStorage>,
-): Promise<string> {
-  const storedKey = await authStorage.getApiKey(model.provider);
-  if (storedKey) return storedKey;
-  ensureOAuthStorage();
-  if (model.provider === "anthropic") {
-    const oauthEnv = process.env.ANTHROPIC_OAUTH_TOKEN;
-    if (oauthEnv?.trim()) return oauthEnv.trim();
-  }
-  const envKey = getEnvApiKey(model.provider);
-  if (envKey) return envKey;
-  if (isOAuthProvider(model.provider)) {
-    const oauthPath = resolveClawdisOAuthPath();
-    const storage = loadOAuthStorageAt(oauthPath);
-    if (storage) {
-      try {
-        const result = await getOAuthApiKey(model.provider, storage);
-        if (result?.apiKey) {
-          storage[model.provider] = result.newCredentials;
-          saveOAuthStorageAt(oauthPath, storage);
-          return result.apiKey;
-        }
-      } catch {
-        // fall through to error below
-      }
-    }
-  }
-  throw new Error(`No API key found for provider "${model.provider}"`);
-}
-
-function resolvePromptSkills(
-  snapshot: SkillSnapshot,
-  entries: SkillEntry[],
-): Skill[] {
-  if (snapshot.resolvedSkills?.length) {
-    return snapshot.resolvedSkills;
-  }
-
-  const snapshotNames = snapshot.skills.map((entry) => entry.name);
-  if (snapshotNames.length === 0) return [];
-
-  const entryByName = new Map(
-    entries.map((entry) => [entry.skill.name, entry.skill]),
-  );
-  return snapshotNames
-    .map((name) => entryByName.get(name))
-    .filter((skill): skill is Skill => Boolean(skill));
 }
 
 export async function runEmbeddedPiAgent(params: {
@@ -421,23 +221,35 @@ export async function runEmbeddedPiAgent(params: {
           });
         restoreSkillEnv = params.skillsSnapshot
           ? applySkillEnvOverridesFromSnapshot({
-            snapshot: params.skillsSnapshot,
-            config: params.config,
-          })
+              snapshot: params.skillsSnapshot,
+              config: params.config,
+            })
           : applySkillEnvOverrides({
-            skills: skillEntries ?? [],
-            config: params.config,
-          });
+              skills: skillEntries ?? [],
+              config: params.config,
+            });
 
         const bootstrapFiles =
           await loadWorkspaceBootstrapFiles(resolvedWorkspace);
         const contextFiles = buildBootstrapContextFiles(bootstrapFiles);
+
         // Inject contextual SQLite memory (hybrid BM25 + vector when prompt available)
         try {
-          const geminiKey = (params.config?.models?.providers?.["gemini"] as { apiKey?: string } | undefined)?.apiKey?.trim();
-          const memorySubstrate = getMemorySubstrate(resolvedWorkspace, geminiKey);
+          const geminiKey = (
+            params.config?.models?.providers?.["gemini"] as
+              | { apiKey?: string }
+              | undefined
+          )?.apiKey?.trim();
+          const memorySubstrate = getMemorySubstrate(
+            resolvedWorkspace,
+            geminiKey,
+          );
           const memories = params.prompt
-            ? await memorySubstrate.recallHybrid(params.prompt, params.sessionId, 10)
+            ? await memorySubstrate.recallHybrid(
+                params.prompt,
+                params.sessionId,
+                10,
+              )
             : memorySubstrate.recent(params.sessionId, 10);
           if (memories.length > 0) {
             const memoryContent = [...memories]
@@ -446,10 +258,10 @@ export async function runEmbeddedPiAgent(params: {
               .join("\n\n---\n\n");
             contextFiles.push({
               path: "_memory.md",
-              content: `Relevant memories for this session:\n\n${memoryContent}`
+              content: `Relevant memories for this session:\n\n${memoryContent}`,
             });
           }
-        } catch (e) {
+        } catch {
           // ignore memory read errors
         }
 
@@ -469,7 +281,6 @@ export async function runEmbeddedPiAgent(params: {
         };
         // Enable reasoning tag hint for all non-Anthropic providers so the model
         // wraps internal reasoning in <think> and user-facing reply in <final>.
-        // This prevents thinking text from leaking into the chat output.
         const reasoningTagHint = provider !== "anthropic";
         const systemPrompt = buildSystemPrompt({
           appendPrompt: buildAgentSystemPromptAppend({
@@ -500,7 +311,6 @@ export async function runEmbeddedPiAgent(params: {
           model,
           thinkingLevel,
           systemPrompt,
-          // Custom tool set: extra bash/process + read image sanitization.
           tools,
           sessionManager,
           settingsManager,
@@ -514,7 +324,8 @@ export async function runEmbeddedPiAgent(params: {
         );
 
         // --- Context Pruning Middleware ---
-        const keepLastTurns = params.config?.agent?.contextPruning?.keepLastTurns;
+        const keepLastTurns =
+          params.config?.agent?.contextPruning?.keepLastTurns;
         if (typeof keepLastTurns === "number" && keepLastTurns > 0) {
           const userIndices: number[] = [];
           for (let i = 0; i < prior.length; i++) {
@@ -624,12 +435,12 @@ export async function runEmbeddedPiAgent(params: {
           model: lastAssistant?.model ?? model.id,
           usage: usage
             ? {
-              input: usage.input,
-              output: usage.output,
-              cacheRead: usage.cacheRead,
-              cacheWrite: usage.cacheWrite,
-              total: usage.totalTokens,
-            }
+                input: usage.input,
+                output: usage.output,
+                cacheRead: usage.cacheRead,
+                cacheWrite: usage.cacheWrite,
+                total: usage.totalTokens,
+              }
             : undefined,
         };
 
@@ -675,10 +486,17 @@ export async function runEmbeddedPiAgent(params: {
               p.text || p.mediaUrl || (p.mediaUrls && p.mediaUrls.length > 0),
           );
 
+        // Persist memory for this run
         try {
-          const geminiKey = (params.config?.models?.providers?.["gemini"] as { apiKey?: string } | undefined)?.apiKey?.trim();
-          const memorySubstrate = getMemorySubstrate(resolvedWorkspace, geminiKey);
-          // Store user prompt
+          const geminiKey = (
+            params.config?.models?.providers?.["gemini"] as
+              | { apiKey?: string }
+              | undefined
+          )?.apiKey?.trim();
+          const memorySubstrate = getMemorySubstrate(
+            resolvedWorkspace,
+            geminiKey,
+          );
           if (params.prompt) {
             memorySubstrate.store({
               agent_id: params.sessionId,
@@ -687,7 +505,6 @@ export async function runEmbeddedPiAgent(params: {
               scope: "episodic",
             });
           }
-          // Store assistant response
           for (const p of payloads) {
             if (p.text) {
               memorySubstrate.store({
@@ -698,7 +515,6 @@ export async function runEmbeddedPiAgent(params: {
               });
             }
           }
-          // Log token usage
           if (usage) {
             memorySubstrate.logUsage({
               agent_id: params.sessionId,
@@ -715,7 +531,6 @@ export async function runEmbeddedPiAgent(params: {
             });
           }
         } catch (e) {
-          // Non-fatal, just log if needed
           console.error("Failed to store memory:", e);
         }
 
