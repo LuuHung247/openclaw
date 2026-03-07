@@ -2,13 +2,12 @@
 # reset-workspace.sh — openclaw workspace reset tool
 #
 # Usage:
-#   ./scripts/reset-workspace.sh --full          Factory reset (xóa tất cả state, giữ config+credentials)
-#   ./scripts/reset-workspace.sh --soft          Update templates only (giữ identity + memory)
-#   ./scripts/reset-workspace.sh --conversations Chỉ xóa chat history + analytics
+#   ./scripts/reset-workspace.sh --fresh   Agent "lần đầu gặp mặt": xóa state, giữ config/keys/skills
+#   ./scripts/reset-workspace.sh --nuke    Xóa tất cả kể cả config — cài lại từ đầu hoàn toàn
 #
 # Các path có thể override bằng env vars:
 #   CLAWDIS_DIR   (default: ~/.clawdis)
-#   CLAWD_DIR     (default: ~/clawd)
+#   CLAWD_DIR     (default: agent.workspace trong clawdis.json, fallback ~/clawd)
 #   TEMPLATES_DIR (default: script's ../docs/templates)
 
 set -euo pipefail
@@ -17,8 +16,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 CLAWDIS_DIR="${CLAWDIS_DIR:-$HOME/.clawdis}"
-CLAWD_DIR="${CLAWD_DIR:-$HOME/clawd}"
 TEMPLATES_DIR="${TEMPLATES_DIR:-$REPO_ROOT/docs/templates}"
+
+# Đọc agent.workspace từ clawdis.json nếu có, fallback ~/clawd
+_detect_clawd_dir() {
+  local cfg="$CLAWDIS_DIR/clawdis.json"
+  if [ -f "$cfg" ] && command -v python3 &>/dev/null; then
+    python3 -c "
+import json, sys
+try:
+    d = json.load(open('$cfg'))
+    w = d.get('agent', {}).get('workspace', '')
+    if w: print(w)
+except: pass
+" 2>/dev/null
+  fi
+}
+CLAWD_DIR="${CLAWD_DIR:-$(_detect_clawd_dir)}"
+CLAWD_DIR="${CLAWD_DIR:-$HOME/clawd}"
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -40,96 +55,82 @@ safe_remove() {
   if [ ! -e "$target" ] && [ ! -L "$target" ]; then
     return 0
   fi
-
   if command -v trash &>/dev/null; then
     trash "$target" && info "trashed: $target"
   else
     local backup="/tmp/openclaw-reset-backup-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$backup"
-    mv "$target" "$backup/" && info "moved to backup: $backup/$(basename "$target")"
+    mv "$target" "$backup/" && info "backed up: $backup/$(basename "$target")"
   fi
-}
-
-safe_remove_glob() {
-  local dir="$1"
-  local pattern="$2"
-  if [ ! -d "$dir" ]; then return 0; fi
-  # shellcheck disable=SC2086
-  local files=("$dir"/$pattern)
-  for f in "${files[@]}"; do
-    [ -e "$f" ] && safe_remove "$f"
-  done
 }
 
 copy_template() {
   local name="$1"
   local src="$TEMPLATES_DIR/$name"
   local dst="$CLAWD_DIR/$name"
-
   if [ ! -f "$src" ]; then
     warn "template not found: $src — skipping"
     return 0
   fi
-
   cp "$src" "$dst"
-  ok "template copied: $name"
+  ok "copied: $name"
 }
 
-# ─── Reset actions ──────────────────────────────────────────────────────────
+# ─── Modes ──────────────────────────────────────────────────────────────────
 
-clear_sessions() {
+mode_fresh() {
+  section "Mode: --fresh"
+  echo -e "Agent sẽ được reset về trạng thái ${BOLD}lần đầu gặp mặt${NC}."
+  echo
+  echo "Xóa:"
+  echo "  - Chat sessions và history"
+  echo "  - Agent memory (memory.md, memory/, memory.sqlite)"
+  echo "  - Agent identity (IDENTITY.md, USER.md) → reset từ template"
+  echo "  - Usage log, media cache, cron jobs, /tmp/clawdis"
+  echo "  - Workspace files (AGENTS/SOUL/TOOLS/BOOTSTRAP) → reset từ template"
+  echo
+  echo -e "${GREEN}Giữ nguyên:${NC}"
+  echo "  - ~/.clawdis/clawdis.json (API keys, models, Telegram token)"
+  echo "  - ~/.clawdis/credentials/ (OAuth tokens)"
+  echo "  - ~/.clawdis/skills/ (installed skills)"
+  echo
+
+  read -r -p "Nhập 'yes' để xác nhận: " confirm
+  if [ "$confirm" != "yes" ]; then echo "Hủy."; exit 0; fi
+  echo
+
   section "Xóa sessions..."
   safe_remove "$CLAWDIS_DIR/sessions"
   mkdir -p "$CLAWDIS_DIR/sessions"
   ok "sessions cleared"
-}
 
-clear_usage_log() {
   section "Xóa usage log..."
   safe_remove "$CLAWDIS_DIR/usage-log.jsonl"
   ok "usage-log cleared"
-}
 
-clear_cron() {
   section "Xóa cron jobs..."
   safe_remove "$CLAWDIS_DIR/cron"
   mkdir -p "$CLAWDIS_DIR/cron"
   ok "cron cleared"
-}
 
-clear_media() {
   section "Xóa media cache..."
   safe_remove "$CLAWDIS_DIR/media"
   mkdir -p "$CLAWDIS_DIR/media"
   ok "media cleared"
-}
 
-clear_tmp() {
   section "Xóa /tmp/clawdis..."
   safe_remove "/tmp/clawdis"
   ok "/tmp/clawdis cleared"
-}
 
-clear_agent_memory() {
   section "Xóa agent memory..."
   safe_remove "$CLAWD_DIR/memory.md"
   safe_remove "$CLAWD_DIR/memory"
   safe_remove "$CLAWD_DIR/.clawdis/memory.sqlite"
-  ok "agent memory cleared"
-}
+  safe_remove "$CLAWD_DIR/.clawdis/memory.sqlite-wal"
+  safe_remove "$CLAWD_DIR/.clawdis/memory.sqlite-shm"
+  ok "memory cleared"
 
-reset_workspace_templates() {
-  # Overwrite AGENTS.md, SOUL.md, TOOLS.md từ template
-  section "Reset workspace templates..."
-  mkdir -p "$CLAWD_DIR"
-  copy_template "AGENTS.md"
-  copy_template "SOUL.md"
-  copy_template "TOOLS.md"
-}
-
-reset_all_workspace_files() {
-  # Full reset: tất cả 6 file + tạo lại BOOTSTRAP.md
-  section "Reset tất cả workspace files..."
+  section "Reset workspace files từ templates..."
   mkdir -p "$CLAWD_DIR"
   copy_template "AGENTS.md"
   copy_template "SOUL.md"
@@ -137,101 +138,92 @@ reset_all_workspace_files() {
   copy_template "IDENTITY.md"
   copy_template "USER.md"
   copy_template "BOOTSTRAP.md"
-  ok "BOOTSTRAP.md tạo lại — agent sẽ bootstrap khi vào session tiếp theo"
+
+  echo
+  ok "Done. Agent sẽ thấy BOOTSTRAP.md và bắt đầu ritual lần đầu gặp mặt."
+  warn "Restart gateway: systemctl --user restart clawdis-gateway.service"
 }
 
-# ─── Modes ──────────────────────────────────────────────────────────────────
-
-mode_conversations() {
-  section "Mode: --conversations"
-  info "Xóa chat history và analytics, giữ identity + memory + cron"
+mode_nuke() {
+  section "Mode: --nuke (Full Wipe)"
+  echo -e "${RED}${BOLD}CẢNH BÁO: Xóa TOÀN BỘ kể cả config, API keys, Telegram token.${NC}"
+  echo "Sau khi nuke, cần cấu hình lại clawdis.json từ đầu."
   echo
-
-  clear_sessions
-  clear_usage_log
-  clear_media
-  clear_tmp
-
-  echo
-  ok "Done. Agent identity, memory, cron jobs còn nguyên."
-  ok "Session tiếp theo: agent tiếp tục như cũ nhưng không có chat history."
-}
-
-mode_soft() {
-  section "Mode: --soft"
-  info "Update templates (AGENTS/SOUL/TOOLS), giữ identity + memory + tất cả ~/.clawdis/"
-  echo
-
-  reset_workspace_templates
-
-  echo
-  ok "Done. Agent nhận hướng dẫn mới từ templates, nhưng vẫn nhớ mọi thứ."
-  warn "Gợi ý: restart gateway để áp dụng — systemctl --user restart clawdis-gateway.service"
-}
-
-mode_full() {
-  section "Mode: --full (Factory Reset)"
-  echo -e "${RED}${BOLD}CẢNH BÁO: Thao tác này sẽ xóa TOÀN BỘ agent state:${NC}"
-  echo "  - Tất cả chat sessions và history"
-  echo "  - Usage analytics"
-  echo "  - Cron jobs và run logs"
-  echo "  - Agent identity (IDENTITY.md, USER.md)"
-  echo "  - Toàn bộ memory (memory.md, memory/, memory.sqlite)"
-  echo "  - Media cache và /tmp/clawdis"
+  echo "Xóa:"
+  echo "  - Tất cả những gì --fresh xóa"
+  echo "  - ~/.clawdis/clawdis.json (config, API keys)"
+  echo "  - ~/.clawdis/credentials/"
   echo
   echo -e "${GREEN}Giữ nguyên:${NC}"
-  echo "  - ~/.clawdis/clawdis.json (config, API keys)"
-  echo "  - ~/.clawdis/credentials/ (OAuth tokens)"
   echo "  - ~/.clawdis/skills/ (installed skills)"
   echo
 
-  read -r -p "Nhập 'yes' để xác nhận factory reset: " confirm
-  if [ "$confirm" != "yes" ]; then
-    echo "Hủy."
-    exit 0
-  fi
-
+  read -r -p "Nhập 'NUKE' (chữ hoa) để xác nhận: " confirm
+  if [ "$confirm" != "NUKE" ]; then echo "Hủy."; exit 0; fi
   echo
 
-  clear_sessions
-  clear_usage_log
-  clear_cron
-  clear_media
-  clear_tmp
-  clear_agent_memory
-  reset_all_workspace_files
+  # Chạy fresh reset trước (không hỏi lại)
+  section "Xóa sessions..."
+  safe_remove "$CLAWDIS_DIR/sessions"
+  mkdir -p "$CLAWDIS_DIR/sessions"
+
+  section "Xóa usage log + cron + media..."
+  safe_remove "$CLAWDIS_DIR/usage-log.jsonl"
+  safe_remove "$CLAWDIS_DIR/cron"
+  mkdir -p "$CLAWDIS_DIR/cron"
+  safe_remove "$CLAWDIS_DIR/media"
+  mkdir -p "$CLAWDIS_DIR/media"
+  safe_remove "/tmp/clawdis"
+
+  section "Xóa agent memory + workspace..."
+  safe_remove "$CLAWD_DIR/memory.md"
+  safe_remove "$CLAWD_DIR/memory"
+  safe_remove "$CLAWD_DIR/.clawdis/memory.sqlite"
+  safe_remove "$CLAWD_DIR/.clawdis/memory.sqlite-wal"
+  safe_remove "$CLAWD_DIR/.clawdis/memory.sqlite-shm"
+
+  section "Reset workspace files từ templates..."
+  mkdir -p "$CLAWD_DIR"
+  copy_template "AGENTS.md"
+  copy_template "SOUL.md"
+  copy_template "TOOLS.md"
+  copy_template "IDENTITY.md"
+  copy_template "USER.md"
+  copy_template "BOOTSTRAP.md"
+
+  section "Xóa config + credentials..."
+  safe_remove "$CLAWDIS_DIR/clawdis.json"
+  safe_remove "$CLAWDIS_DIR/credentials"
+  ok "config + credentials cleared"
 
   echo
-  ok "Factory reset hoàn tất."
-  ok "Session tiếp theo: agent sẽ thấy BOOTSTRAP.md và bắt đầu ritual đặt tên."
-  warn "Gợi ý: restart gateway — systemctl --user restart clawdis-gateway.service"
+  ok "Done. Cần tạo lại ~/.clawdis/clawdis.json trước khi khởi động gateway."
 }
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 usage() {
-  echo "Usage: $(basename "$0") [--full | --soft | --conversations]"
+  echo "Usage: $(basename "$0") [--fresh | --nuke]"
   echo
-  echo "  --full           Factory reset: xóa tất cả state, giữ config + credentials + skills"
-  echo "  --soft           Update templates: giữ identity, memory, tất cả ~/.clawdis/"
-  echo "  --conversations  Xóa chat history + analytics: giữ identity, memory, cron"
+  echo "  --fresh  Reset agent về trạng thái lần đầu gặp mặt."
+  echo "           Giữ: config (API keys, Telegram token), credentials, skills."
+  echo "           Xóa: sessions, memory, identity, cron, media."
+  echo
+  echo "  --nuke   Xóa tất cả kể cả config. Cần cấu hình lại từ đầu."
+  echo "           Giữ: skills."
   echo
   echo "Env vars:"
   echo "  CLAWDIS_DIR    (default: ~/.clawdis)"
-  echo "  CLAWD_DIR      (default: ~/clawd)"
+  echo "  CLAWD_DIR      (default: agent.workspace in clawdis.json, fallback ~/clawd)"
   echo "  TEMPLATES_DIR  (default: <repo>/docs/templates)"
 }
 
-if [ $# -eq 0 ]; then
-  usage
-  exit 1
-fi
+if [ $# -eq 0 ]; then usage; exit 1; fi
 
 case "$1" in
-  --full)          mode_full ;;
-  --soft)          mode_soft ;;
-  --conversations) mode_conversations ;;
-  -h|--help)       usage ;;
+  --fresh)   mode_fresh ;;
+  --nuke)    mode_nuke ;;
+  -h|--help) usage ;;
   *)
     echo "Unknown option: $1"
     usage

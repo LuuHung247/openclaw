@@ -229,15 +229,14 @@ function settingsPage() {
       this.defaultModelSaving = true;
       try {
         await OpenFangAPI.post('/api/config', { agent: { model: this.defaultModel } });
-        // Patch all active sessions to use the new model immediately
-        var model = this.defaultModel;
+        // Clear modelOverride on all sessions so they pick up the new config default
         try {
           var res = await OpenFangAPI.getSessions();
           var sessions = (res && res.sessions) || [];
           await Promise.all(sessions.map(function(s) {
             var key = s.session_key || s.agent_id || s.session_id;
             if (!key) return Promise.resolve();
-            return OpenFangAPI.request('sessions.patch', { key: key, modelOverride: model }).catch(function() {});
+            return OpenFangAPI.request('sessions.patch', { key: key, modelOverride: null }).catch(function() {});
           }));
         } catch(e2) { /* non-critical — config already saved */ }
         // Reload config to confirm persisted value and sync UI state

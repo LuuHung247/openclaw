@@ -1,6 +1,13 @@
 // OpenFang Chat Page — Agent chat with markdown + streaming
 'use strict';
 
+// Parse "provider/model-name" or "model-name" → display name without provider prefix
+function parseModelName(model) {
+  if (!model) return '';
+  var idx = model.indexOf('/');
+  return idx >= 0 ? model.slice(idx + 1) : model;
+}
+
 function chatPage() {
   var msgId = 0;
   return {
@@ -130,12 +137,10 @@ function chatPage() {
         OpenFangAPI.getStatus().then(function(s) {
           var model = s.default_model || '';
           if (!model || model === '?') return;
-          var parts = model.split('/');
-          var modelName = parts.length >= 2 ? parts.slice(1).join('/') : model;
           if (self.currentAgent) {
             self.currentAgent.model = model;
             self.currentAgent.model_provider = '';
-            self.currentAgent.model_name = modelName;
+            self.currentAgent.model_name = parseModelName(model);
           }
         }).catch(function() {});
       });
@@ -378,8 +383,13 @@ function chatPage() {
               OpenFangAPI.getSessions().then(function(res) {
                 var list = (res && res.sessions) || [];
                 var s = list.find(function(x) { return x.agent_id === self.currentAgent.id || x.session_key === self.currentAgent.id; });
-                var model = (s && s.model) || self.currentAgent.model_name || '?';
-                if (s && s.model) { self.currentAgent.model_name = s.model; }
+                var rawModel = (s && s.model) || self.currentAgent.model || '';
+                var model = parseModelName(rawModel) || rawModel || '?';
+                if (rawModel && self.currentAgent) {
+                  self.currentAgent.model = rawModel;
+                  self.currentAgent.model_provider = '';
+                  self.currentAgent.model_name = parseModelName(rawModel);
+                }
                 self.messages.push({ id: ++msgId, role: 'system', text: '**Current Model**\n- Model: `' + model + '`', meta: '', tools: [] });
                 self.scrollToBottom();
               }).catch(function() {
@@ -445,12 +455,10 @@ function chatPage() {
       var self = this;
       OpenFangAPI.getStatus().then(function(s) {
         var model = s.default_model || '';
-        var parts = model ? model.split('/') : [];
-        var modelName = parts.length >= 2 ? parts.slice(1).join('/') : model;
         if (self.currentAgent && self.currentAgent.id === 'webui') {
           self.currentAgent.model = model;
           self.currentAgent.model_provider = '';
-          self.currentAgent.model_name = modelName;
+          self.currentAgent.model_name = parseModelName(model);
         }
       }).catch(function() {});
     },

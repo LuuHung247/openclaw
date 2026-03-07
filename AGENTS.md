@@ -137,27 +137,19 @@ Khi sửa `buildAgentSystemPromptAppend()`, giữ nguyên:
 
 Script `scripts/reset-workspace.sh` — dùng khi cần reset agent state. Templates nằm ở `docs/templates/`.
 
-| Mode | Tác dụng |
-|------|----------|
-| `--conversations` | Xóa sessions + usage log + media. Giữ identity, memory, cron. |
-| `--soft` | Overwrite AGENTS/SOUL/TOOLS từ template. Giữ identity + memory + `~/.clawdis/`. |
-| `--full` | Factory reset. Require gõ `yes`. Giữ `clawdis.json`, `credentials/`, `skills/`. |
+| Mode | Confirm | Tác dụng |
+|------|---------|----------|
+| `--fresh` | gõ `yes` | Agent "lần đầu gặp mặt": xóa sessions, memory, identity, cron. **Giữ** config, API keys, Telegram token, skills. |
+| `--nuke` | gõ `NUKE` | Xóa tất cả kể cả `clawdis.json` và credentials. **Giữ** skills. Cần cấu hình lại từ đầu. |
 
-**Những gì KHÔNG bị xóa trong mọi mode:**
-- `~/.clawdis/clawdis.json` — provider config, API keys
-- `~/.clawdis/credentials/oauth.json` — OAuth tokens
+**`--fresh` giữ nguyên:**
+- `~/.clawdis/clawdis.json` — API keys, models, Telegram token
+- `~/.clawdis/credentials/` — OAuth tokens
 - `~/.clawdis/skills/` — installed skills
 
-**Flow dev khi sửa templates:**
+**Flow reset agent về lần đầu gặp mặt:**
 ```bash
-vim docs/templates/TOOLS.md       # sửa template
-./scripts/reset-workspace.sh --soft   # áp dụng lên workspace
-systemctl --user restart clawdis-gateway.service
-```
-
-**Flow test bootstrap từ đầu:**
-```bash
-./scripts/reset-workspace.sh --full   # factory reset (gõ 'yes' để confirm)
+./scripts/reset-workspace.sh --fresh
 systemctl --user restart clawdis-gateway.service
 # Chat với agent qua Telegram → nó sẽ thấy BOOTSTRAP.md và bắt đầu ritual
 ```
