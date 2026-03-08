@@ -1,4 +1,4 @@
-// OpenFang Scheduler Page — Cron job management + event triggers unified view
+// Openclaw Scheduler Page — Cron job management via Gateway WebSocket API
 'use strict';
 
 function schedulerPage() {
@@ -10,7 +10,7 @@ function schedulerPage() {
     loading: true,
     loadError: '',
 
-    // -- Event Triggers state --
+    // -- Event Triggers state (not implemented yet in openclaw) --
     triggers: [],
     trigLoading: false,
     trigLoadError: '',
@@ -23,15 +23,22 @@ function schedulerPage() {
     showCreateForm: false,
     newJob: {
       name: '',
-      cron: '',
-      agent_id: '',
+      schedule: 'cron', // 'cron', 'every', 'at'
+      cronExpr: '',
+      intervalMinutes: 5,
+      atTimestamp: '',
+      sessionTarget: 'isolated', // 'main' or 'isolated'
       message: '',
-      enabled: true
+      enabled: true,
+      description: ''
     },
     creating: false,
 
     // -- Run Now state --
     runningJobId: '',
+
+    // -- Cron status --
+    schedulerStatus: null,
 
     // Cron presets
     cronPresets: [
@@ -54,48 +61,69 @@ function schedulerPage() {
       this.loading = true;
       this.loadError = '';
       try {
-        await this.loadJobs();
+        await Promise.all([this.loadJobs(), this.loadSchedulerStatus()]);
       } catch(e) {
         this.loadError = e.message || 'Could not load scheduler data.';
       }
       this.loading = false;
     },
 
+    async loadSchedulerStatus() {
+      try {
+        this.schedulerStatus = await OpenFangAPI.getStatus();
+      } catch(e) {
+        this.schedulerStatus = null;
+      }
+    },
+
     async loadJobs() {
-      // Gateway cron.list returns flat: [{id, name, schedule, command, sessionKey, enabled, lastRun, nextRun}]
-      // openfang /api/cron/jobs returns nested: [{id, name, schedule:{kind,expr}, action:{message}, agent_id, ...}]
-      // api.js wraps both as { jobs: [...] }
-      var data = await OpenFangAPI.get('/api/cron/jobs');
-      var raw = data.jobs || data || [];
-      this.jobs = raw.map(function(j) {
-        // Handle both flat (gateway) and nested (openfang) shapes
+      // Openclaw Gateway: cron.list returns { jobs: [...] }
+      // Each job: { id, name, description, enabled, createdAtMs, updatedAtMs, schedule, sessionTarget, wakeMode, payload, isolation, state }
+      var raw = await OpenFangAPI.getCronJobs();
+      this.jobs = (raw || []).map(function(j) {
+        // Parse schedule object to human-readable string
         var cron = '';
         if (j.schedule) {
-          if (typeof j.schedule === 'string') {
-            cron = j.schedule;
-          } else if (j.schedule.kind === 'cron') {
+          if (j.schedule.kind === 'cron') {
             cron = j.schedule.expr || '';
           } else if (j.schedule.kind === 'every') {
-            cron = 'every ' + j.schedule.every_secs + 's';
+            var secs = Math.floor((j.schedule.everyMs || 0) / 1000);
+            cron = 'every ' + secs + 's';
           } else if (j.schedule.kind === 'at') {
-            cron = 'at ' + (j.schedule.at || '');
+            var at = j.schedule.atMs ? new Date(j.schedule.atMs).toISOString() : '';
+            cron = 'at ' + at;
           }
         }
-        // message: gateway uses j.command, openfang uses j.action.message
-        var message = j.command || (j.action ? j.action.message || '' : '') || '';
-        // agent_id: gateway uses j.sessionKey, openfang uses j.agent_id
-        var agentId = j.agent_id || j.sessionKey || '';
+        // Extract message from payload
+        var message = '';
+        if (j.payload) {
+          if (j.payload.kind === 'systemEvent') {
+            message = j.payload.text || '';
+          } else if (j.payload.kind === 'agentTurn') {
+            message = j.payload.message || '';
+          }
+        }
+        // Parse state for timestamps
+        var lastRun = j.state && j.state.lastRunAtMs ? new Date(j.state.lastRunAtMs).toISOString() : null;
+        var nextRun = j.state && j.state.nextRunAtMs ? new Date(j.state.nextRunAtMs).toISOString() : null;
+        var lastStatus = j.state ? j.state.lastStatus : null;
+        var lastError = j.state ? j.state.lastError : null;
+
         return {
           id: j.id,
           name: j.name,
+          description: j.description || '',
           cron: cron,
-          agent_id: agentId,
+          schedule: j.schedule,
+          sessionTarget: j.sessionTarget || 'main',
           message: message,
           enabled: j.enabled !== false,
-          last_run: j.last_run || j.lastRun || null,
-          next_run: j.next_run || j.nextRun || null,
-          delivery: j.delivery ? (j.delivery.kind || '') : '',
-          created_at: j.created_at || null
+          last_run: lastRun,
+          next_run: nextRun,
+          lastStatus: lastStatus,
+          lastError: lastError,
+          created_at: j.createdAtMs ? new Date(j.createdAtMs).toISOString() : null,
+          updated_at: j.updatedAtMs ? new Date(j.updatedAtMs).toISOString() : null
         };
       });
     },
@@ -125,24 +153,12 @@ function schedulerPage() {
               timestamp: job.last_run,
               name: job.name || '(unnamed)',
               type: 'schedule',
-              status: 'completed',
+              status: job.lastStatus || 'unknown',
               run_count: 0
             });
           }
         }
-        var triggers = this.triggers || [];
-        for (var j = 0; j < triggers.length; j++) {
-          var t = triggers[j];
-          if (t.fire_count > 0) {
-            historyItems.push({
-              timestamp: t.created_at,
-              name: 'Trigger: ' + this.triggerType(t.pattern),
-              type: 'trigger',
-              status: 'fired',
-              run_count: t.fire_count
-            });
-          }
-        }
+        // Triggers not implemented yet in openclaw
         historyItems.sort(function(a, b) {
           return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
         });
@@ -160,27 +176,79 @@ function schedulerPage() {
         OpenFangToast.warn('Please enter a job name');
         return;
       }
-      if (!this.newJob.cron.trim()) {
-        OpenFangToast.warn('Please enter a cron expression');
-        return;
-      }
       this.creating = true;
       try {
         var jobName = this.newJob.name;
-        // api.js createCronJob maps: name, schedule/cron, command/message, sessionKey/agent_id, enabled
-        var body = {
+        // Build schedule object based on type
+        var schedule;
+        if (this.newJob.schedule === 'cron') {
+          if (!this.newJob.cronExpr.trim()) {
+            OpenFangToast.warn('Please enter a cron expression');
+            this.creating = false;
+            return;
+          }
+          schedule = { kind: 'cron', expr: this.newJob.cronExpr };
+        } else if (this.newJob.schedule === 'every') {
+          var everyMs = (this.newJob.intervalMinutes || 5) * 60 * 1000;
+          schedule = { kind: 'every', everyMs: everyMs };
+        } else if (this.newJob.schedule === 'at') {
+          if (!this.newJob.atTimestamp) {
+            OpenFangToast.warn('Please enter a timestamp');
+            this.creating = false;
+            return;
+          }
+          var atMs = new Date(this.newJob.atTimestamp).getTime();
+          if (isNaN(atMs)) {
+            OpenFangToast.warn('Invalid timestamp');
+            this.creating = false;
+            return;
+          }
+          schedule = { kind: 'at', atMs: atMs };
+        } else {
+          OpenFangToast.warn('Invalid schedule type');
+          this.creating = false;
+          return;
+        }
+
+        // Build payload object
+        var payload;
+        if (this.newJob.sessionTarget === 'main') {
+          payload = {
+            kind: 'systemEvent',
+            text: this.newJob.message || 'Scheduled task: ' + this.newJob.name
+          };
+        } else {
+          payload = {
+            kind: 'agentTurn',
+            message: this.newJob.message || 'Scheduled task: ' + this.newJob.name
+          };
+        }
+
+        // Openclaw Gateway: cron.add accepts full CronJobCreate object
+        var jobSpec = {
           name: this.newJob.name,
-          schedule: this.newJob.cron,
-          cron: this.newJob.cron,
-          command: this.newJob.message || 'Scheduled task: ' + this.newJob.name,
-          message: this.newJob.message || 'Scheduled task: ' + this.newJob.name,
-          sessionKey: this.newJob.agent_id || 'main',
-          agent_id: this.newJob.agent_id || 'main',
-          enabled: this.newJob.enabled
+          description: this.newJob.description || undefined,
+          enabled: this.newJob.enabled,
+          schedule: schedule,
+          sessionTarget: this.newJob.sessionTarget,
+          wakeMode: 'next-heartbeat',
+          payload: payload,
+          isolation: this.newJob.sessionTarget === 'isolated' ? { postToMainPrefix: 'Cron' } : undefined
         };
-        await OpenFangAPI.post('/api/cron/jobs', body);
+
+        await OpenFangAPI.createCronJob(jobSpec);
         this.showCreateForm = false;
-        this.newJob = { name: '', cron: '', agent_id: '', message: '', enabled: true };
+        this.newJob = {
+          name: '',
+          schedule: 'cron',
+          cronExpr: '',
+          intervalMinutes: 5,
+          atTimestamp: '',
+          sessionTarget: 'isolated',
+          message: '',
+          enabled: true,
+          description: ''
+        };
         OpenFangToast.success('Schedule "' + jobName + '" created');
         await this.loadJobs();
       } catch(e) {
@@ -192,7 +260,7 @@ function schedulerPage() {
     async toggleJob(job) {
       try {
         var newState = !job.enabled;
-        await OpenFangAPI.put('/api/cron/jobs/' + job.id, { enabled: newState });
+        await OpenFangAPI.patchCronJob(job.id, { enabled: newState });
         job.enabled = newState;
         OpenFangToast.success('Schedule ' + (newState ? 'enabled' : 'paused'));
       } catch(e) {
@@ -205,7 +273,7 @@ function schedulerPage() {
       var jobName = job.name || job.id;
       OpenFangToast.confirm('Delete Schedule', 'Delete "' + jobName + '"? This cannot be undone.', async function() {
         try {
-          await OpenFangAPI.del('/api/cron/jobs/' + job.id);
+          await OpenFangAPI.deleteCronJob(job.id);
           self.jobs = self.jobs.filter(function(j) { return j.id !== job.id; });
           OpenFangToast.success('Schedule "' + jobName + '" deleted');
         } catch(e) {
@@ -217,16 +285,35 @@ function schedulerPage() {
     async runNow(job) {
       this.runningJobId = job.id;
       try {
-        var result = await OpenFangAPI.post('/api/cron/jobs/' + job.id + '/run', {});
+        await OpenFangAPI.runCronJob(job.id);
         OpenFangToast.success('Schedule "' + (job.name || 'job') + '" triggered');
-        job.last_run = new Date().toISOString();
+        // Reload to get updated status
+        await this.loadJobs();
       } catch(e) {
         OpenFangToast.error('Failed to run job: ' + (e.message || e));
       }
       this.runningJobId = '';
     },
 
-    // ── Trigger helpers ──
+    async viewRuns(job) {
+      // Load run history for this job
+      try {
+        var runs = await OpenFangAPI.getCronRuns(job.id);
+        if (runs && runs.length > 0) {
+          // Show runs in a simple alert for now (TODO: better UI)
+          var lines = runs.map(function(r) {
+            return new Date(r.timestamp).toLocaleString() + ' - ' + (r.status || 'unknown');
+          }).join('\n');
+          alert('Recent runs:\n' + lines);
+        } else {
+          OpenFangToast.info('No run history yet');
+        }
+      } catch(e) {
+        OpenFangToast.error('Failed to load runs: ' + (e.message || e));
+      }
+    },
+
+    // ── Trigger helpers (not implemented yet in openclaw) ──
 
     triggerType(pattern) {
       if (!pattern) return 'unknown';
@@ -249,27 +336,13 @@ function schedulerPage() {
     },
 
     async toggleTrigger(trigger) {
-      try {
-        var newState = !trigger.enabled;
-        await OpenFangAPI.put('/api/triggers/' + trigger.id, { enabled: newState });
-        trigger.enabled = newState;
-        OpenFangToast.success('Trigger ' + (newState ? 'enabled' : 'disabled'));
-      } catch(e) {
-        OpenFangToast.error('Failed to toggle trigger: ' + (e.message || e));
-      }
+      OpenFangToast.warn('Triggers not implemented yet in openclaw');
+      // TODO: Implement in Phase 5
     },
 
     deleteTrigger(trigger) {
-      var self = this;
-      OpenFangToast.confirm('Delete Trigger', 'Delete this trigger? This cannot be undone.', async function() {
-        try {
-          await OpenFangAPI.del('/api/triggers/' + trigger.id);
-          self.triggers = self.triggers.filter(function(t) { return t.id !== trigger.id; });
-          OpenFangToast.success('Trigger deleted');
-        } catch(e) {
-          OpenFangToast.error('Failed to delete trigger: ' + (e.message || e));
-        }
-      });
+      OpenFangToast.warn('Triggers not implemented yet in openclaw');
+      // TODO: Implement in Phase 5
     },
 
     // ── Utility ──
@@ -354,7 +427,8 @@ function schedulerPage() {
     },
 
     applyCronPreset(preset) {
-      this.newJob.cron = preset.cron;
+      this.newJob.cronExpr = preset.cron;
+      this.newJob.schedule = 'cron';
     },
 
     formatTime(ts) {

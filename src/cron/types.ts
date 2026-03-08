@@ -23,6 +23,8 @@ export type CronPayload =
 
 export type CronIsolation = {
   postToMainPrefix?: string;
+  maxAttempts?: number;
+  retryBackoffMs?: number;
 };
 
 export type CronJobState = {
@@ -32,6 +34,7 @@ export type CronJobState = {
   lastStatus?: "ok" | "error" | "skipped";
   lastError?: string;
   lastDurationMs?: number;
+  consecutiveErrors?: number;
 };
 
 export type CronJob = {

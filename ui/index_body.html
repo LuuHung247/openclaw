@@ -2239,7 +2239,7 @@
                       <tr>
                         <th>Name</th>
                         <th>Schedule</th>
-                        <th>Agent</th>
+                        <th>Session</th>
                         <th>Status</th>
                         <th>Last Run</th>
                         <th>Next Run</th>
@@ -2254,16 +2254,19 @@
                             <div class="text-xs text-dim" x-show="job.message"
                               x-text="(job.message || '').substring(0, 60) + ((job.message || '').length > 60 ? '...' : '')"
                               :title="job.message"></div>
+                            <div class="text-xs text-dim" x-show="job.lastError" style="color:var(--error)" x-text="'Error: ' + job.lastError"></div>
                           </td>
                           <td>
                             <code style="font-size:11px;color:var(--accent)" x-text="job.cron"></code>
                             <div class="text-xs text-dim" x-text="describeCron(job.cron)"></div>
                           </td>
-                          <td class="truncate" style="max-width:120px" x-text="agentName(job.agent_id || job.agent)"
-                            :title="job.agent_id || job.agent"></td>
+                          <td class="truncate" style="max-width:120px">
+                            <span class="badge" :class="job.sessionTarget === 'isolated' ? 'badge-info' : 'badge-dim'" x-text="job.sessionTarget === 'isolated' ? 'Isolated' : 'Main'"></span>
+                          </td>
                           <td>
                             <span class="badge" :class="job.enabled ? 'badge-success' : 'badge-dim'"
                               x-text="job.enabled ? 'Active' : 'Paused'"></span>
+                            <div class="text-xs text-dim" x-show="job.lastStatus" x-text="'Last: ' + job.lastStatus"></div>
                           </td>
                           <td class="text-xs" :title="formatTime(job.last_run)" x-text="relativeTime(job.last_run)">
                           </td>
@@ -2276,6 +2279,7 @@
                                 <span x-show="runningJobId !== job.id">Run</span>
                                 <span x-show="runningJobId === job.id">...</span>
                               </button>
+                              <button class="btn btn-ghost btn-sm" @click="viewRuns(job)">History</button>
                               <button class="btn btn-ghost btn-sm" @click="toggleJob(job)"
                                 x-text="job.enabled ? 'Pause' : 'Enable'"></button>
                               <button class="btn btn-danger btn-sm" @click="deleteJob(job)">Del</button>
@@ -2312,36 +2316,69 @@
                     </div>
 
                     <div class="form-group">
-                      <label>Cron Expression</label>
-                      <input class="form-input" x-model="newJob.cron" placeholder="0 9 * * 1-5"
-                        style="font-family:monospace">
-                      <div class="text-xs text-dim mt-1" x-show="newJob.cron" x-text="describeCron(newJob.cron)"></div>
-                      <div class="text-xs text-dim mt-1">Format: <code>minute hour day-of-month month day-of-week</code>
-                      </div>
+                      <label>Description (optional)</label>
+                      <input class="form-input" x-model="newJob.description" placeholder="Daily status report generator">
                     </div>
 
                     <div class="form-group">
-                      <label>Quick Presets</label>
-                      <div class="flex gap-1 flex-wrap">
-                        <template x-for="preset in cronPresets" :key="preset.cron">
-                          <button class="btn btn-sm" :class="newJob.cron === preset.cron ? 'btn-primary' : 'btn-ghost'"
-                            @click="applyCronPreset(preset)" x-text="preset.label"></button>
-                        </template>
-                      </div>
-                    </div>
-
-                    <div class="form-group">
-                      <label>Target Agent</label>
-                      <select class="form-select" x-model="newJob.agent_id">
-                        <option value="">Any available agent</option>
-                        <template x-for="a in availableAgents" :key="a.id">
-                          <option :value="a.id"
-                            x-text="a.name + ' (' + (a.model_provider || 'unknown') + ':' + (a.model_name || 'unknown') + ')'">
-                          </option>
-                        </template>
+                      <label>Schedule Type</label>
+                      <select class="form-select" x-model="newJob.schedule">
+                        <option value="cron">Cron Expression</option>
+                        <option value="every">Interval (every N minutes)</option>
+                        <option value="at">One-time (at specific time)</option>
                       </select>
-                      <div class="text-xs text-dim mt-1" x-show="!availableAgents.length">No agents running. <a
-                          href="#agents" style="color:var(--accent)">Spawn one first.</a></div>
+                    </div>
+
+                    <!-- Cron Expression -->
+                    <div x-show="newJob.schedule === 'cron'">
+                      <div class="form-group">
+                        <label>Cron Expression</label>
+                        <input class="form-input" x-model="newJob.cronExpr" placeholder="0 9 * * 1-5"
+                          style="font-family:monospace">
+                        <div class="text-xs text-dim mt-1" x-show="newJob.cronExpr" x-text="describeCron(newJob.cronExpr)"></div>
+                        <div class="text-xs text-dim mt-1">Format: <code>minute hour day-of-month month day-of-week</code>
+                        </div>
+                      </div>
+
+                      <div class="form-group">
+                        <label>Quick Presets</label>
+                        <div class="flex gap-1 flex-wrap">
+                          <template x-for="preset in cronPresets" :key="preset.cron">
+                            <button class="btn btn-sm" :class="newJob.cronExpr === preset.cron ? 'btn-primary' : 'btn-ghost'"
+                              @click="applyCronPreset(preset)" x-text="preset.label"></button>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Interval -->
+                    <div x-show="newJob.schedule === 'every'">
+                      <div class="form-group">
+                        <label>Interval (minutes)</label>
+                        <input class="form-input" type="number" x-model="newJob.intervalMinutes" min="1" max="10080">
+                        <div class="text-xs text-dim mt-1">Job will run every <span x-text="newJob.intervalMinutes"></span> minutes</div>
+                      </div>
+                    </div>
+
+                    <!-- One-time -->
+                    <div x-show="newJob.schedule === 'at'">
+                      <div class="form-group">
+                        <label>Run At (ISO 8601 timestamp)</label>
+                        <input class="form-input" type="datetime-local" x-model="newJob.atTimestamp">
+                        <div class="text-xs text-dim mt-1">Example: 2026-03-10T09:00 (local time)</div>
+                      </div>
+                    </div>
+
+                    <div class="form-group">
+                      <label>Session Target</label>
+                      <select class="form-select" x-model="newJob.sessionTarget">
+                        <option value="isolated">Isolated Agent (recommended)</option>
+                        <option value="main">Main Agent Session</option>
+                      </select>
+                      <div class="text-xs text-dim mt-1">
+                        <span x-show="newJob.sessionTarget === 'isolated'">Runs in a separate isolated session with fresh context.</span>
+                        <span x-show="newJob.sessionTarget === 'main'">Sends a system event to the main session.</span>
+                      </div>
                     </div>
 
                     <div class="form-group">

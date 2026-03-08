@@ -452,14 +452,54 @@ export class CronService {
       job.state.lastDurationMs = Math.max(0, endedAt - startedAt);
       job.state.lastError = err;
 
-      if (job.schedule.kind === "at" && status === "ok") {
-        // One-shot job completed successfully; disable it.
-        job.enabled = false;
-        job.state.nextRunAtMs = undefined;
-      } else if (job.enabled) {
-        job.state.nextRunAtMs = this.computeJobNextRunAtMs(job, endedAt);
+      // Handle retry logic for errors
+      if (status === "error") {
+        const maxAttempts = job.isolation?.maxAttempts ?? 1;
+        const consecutiveErrors = (job.state.consecutiveErrors ?? 0) + 1;
+        job.state.consecutiveErrors = consecutiveErrors;
+
+        // Auto-disable after 5 consecutive failures
+        if (consecutiveErrors >= 5) {
+          job.enabled = false;
+          this.deps.log.warn(
+            { jobId: job.id, consecutiveErrors },
+            "cron: auto-disabled job after 5 consecutive failures",
+          );
+          job.state.nextRunAtMs = undefined;
+        } else if (consecutiveErrors < maxAttempts) {
+          // Schedule retry with exponential backoff
+          const backoffMs = job.isolation?.retryBackoffMs ?? 60_000;
+          const retryDelay = backoffMs * consecutiveErrors;
+          job.state.nextRunAtMs = endedAt + retryDelay;
+          this.deps.log.info(
+            { jobId: job.id, consecutiveErrors, retryDelay },
+            "cron: scheduling retry",
+          );
+        } else {
+          // Max attempts reached, compute next normal run
+          if (job.schedule.kind === "at") {
+            // One-shot job failed, disable it
+            job.enabled = false;
+            job.state.nextRunAtMs = undefined;
+          } else if (job.enabled) {
+            job.state.nextRunAtMs = this.computeJobNextRunAtMs(job, endedAt);
+          } else {
+            job.state.nextRunAtMs = undefined;
+          }
+        }
       } else {
-        job.state.nextRunAtMs = undefined;
+        // Success or skipped, reset consecutive errors
+        job.state.consecutiveErrors = 0;
+
+        if (job.schedule.kind === "at" && status === "ok") {
+          // One-shot job completed successfully; disable it.
+          job.enabled = false;
+          job.state.nextRunAtMs = undefined;
+        } else if (job.enabled) {
+          job.state.nextRunAtMs = this.computeJobNextRunAtMs(job, endedAt);
+        } else {
+          job.state.nextRunAtMs = undefined;
+        }
       }
 
       this.emit({
