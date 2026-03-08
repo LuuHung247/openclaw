@@ -183,6 +183,21 @@ export type TelegramConfig = {
   webhookPath?: string;
 };
 
+export type LarkConfig = {
+  /** If false, do not start the Lark provider. Default: true. */
+  enabled?: boolean;
+  /** Lark app ID */
+  appId?: string;
+  /** Lark app secret */
+  appSecret?: string;
+  /** Webhook port for inbound events. Default: 18792 */
+  webhookPort?: number;
+  /** Verification token for webhook URL verification */
+  verificationToken?: string;
+  /** Encrypt key for webhook event decryption */
+  encryptKey?: string;
+};
+
 export type DiscordDmConfig = {
   /** If false, ignore all incoming Discord DMs. Default: true. */
   enabled?: boolean;
@@ -607,6 +622,7 @@ export type ClawdisConfig = {
   web?: WebConfig;
   whatsapp?: WhatsAppConfig;
   telegram?: TelegramConfig;
+  lark?: LarkConfig;
   discord?: DiscordConfig;
   imessage?: IMessageConfig;
   cron?: CronConfig;
@@ -720,6 +736,7 @@ const QueueModeBySurfaceSchema = z
   .object({
     whatsapp: QueueModeSchema.optional(),
     telegram: QueueModeSchema.optional(),
+    lark: QueueModeSchema.optional(),
     discord: QueueModeSchema.optional(),
     imessage: QueueModeSchema.optional(),
     webchat: QueueModeSchema.optional(),
@@ -1145,6 +1162,16 @@ const ClawdisSchema = z.object({
             .optional(),
         )
         .optional(),
+    })
+    .optional(),
+  lark: z
+    .object({
+      enabled: z.boolean().optional(),
+      appId: z.string().optional(),
+      appSecret: z.string().optional(),
+      webhookPort: z.number().int().positive().optional(),
+      verificationToken: z.string().optional(),
+      encryptKey: z.string().optional(),
     })
     .optional(),
   bridge: z

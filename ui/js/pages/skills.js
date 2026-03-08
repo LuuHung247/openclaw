@@ -106,6 +106,11 @@ function skillsPage() {
 
     async loadData() {
       await this.loadSkills();
+      await this.loadMcpServers();
+    },
+
+    init() {
+      this.loadData();
     },
 
     // Debounced search — fires 350ms after user stops typing

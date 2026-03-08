@@ -101,7 +101,7 @@ document.addEventListener('alpine:init', function() {
     version: '?',
     agentCount: 0,
     pendingAgent: null,
-    focusMode: localStorage.getItem('openclaw-focus') === 'true',
+    focusMode: false, // Disabled - focus mode caused sidebar to disappear
     showAuthPrompt: false,
     // Persist chat state across tab navigation (Alpine x-if unmounts components)
     chatMessages: [],

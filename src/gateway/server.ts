@@ -130,6 +130,7 @@ import {
 import { setCommandLaneConcurrency } from "../process/command-queue.js";
 import { runExec } from "../process/exec.js";
 import { defaultRuntime } from "../runtime.js";
+import { startLarkProvider, stopLarkProvider } from "../lark/lark-provider-runner.js";
 import { monitorTelegramProvider } from "../telegram/monitor.js";
 import { probeTelegram, type TelegramProbe } from "../telegram/probe.js";
 import { sendMessageTelegram } from "../telegram/send.js";
@@ -275,6 +276,7 @@ const logHooks = log.child("hooks");
 const logWsControl = log.child("ws");
 const logTelegram = logProviders.child("telegram");
 const telegramRuntimeEnv = runtimeForLogger(logTelegram);
+const logLark = logProviders.child("lark");
 
 function resolveBonjourCliPath(): string | undefined {
   const envPath = process.env.CLAWDIS_CLI_PATH?.trim();
@@ -555,6 +557,7 @@ const METHODS = [
   "usage.by-model",
   "usage.by-agent",
   "usage.daily",
+  "channels.lark.reload",
 ];
 
 const EVENTS = [
@@ -1912,6 +1915,12 @@ export async function startGatewayServer(
 
   const startProviders = async () => {
     await startTelegramProvider();
+    const cfg = loadConfig();
+    if (cfg.lark?.appId && cfg.lark?.appSecret && cfg.lark?.enabled !== false) {
+      startLarkProvider()
+        .then(() => logLark.info("provider started"))
+        .catch((err) => logLark.error(`provider failed to start: ${String(err)}`));
+    }
   };
 
   const broadcast = (
@@ -2222,6 +2231,14 @@ export async function startGatewayServer(
           await stopTelegramProvider();
           startTelegramProvider().catch((err) => {
             logTelegram.error(`config update telegram spawn failed: ${formatError(err)}`);
+          });
+          stopLarkProvider().catch(() => { /* ignore */ }).then(() => {
+            const newCfg = loadConfig();
+            if (newCfg.lark?.appId && newCfg.lark?.appSecret && newCfg.lark?.enabled !== false) {
+              startLarkProvider()
+                .then(() => logLark.info("provider restarted after config update"))
+                .catch((err) => logLark.error(`config update lark spawn failed: ${formatError(err)}`));
+            }
           });
           return {
             ok: true,
@@ -3937,6 +3954,8 @@ export async function startGatewayServer(
                 lastProbeAt = Date.now();
               }
 
+              const larkCfg = loadConfig().lark;
+              const larkConfigured = !!(larkCfg?.appId && larkCfg?.appSecret && larkCfg?.enabled !== false);
               respond(
                 true,
                 {
@@ -3952,9 +3971,36 @@ export async function startGatewayServer(
                     probe: telegramProbe,
                     lastProbeAt,
                   },
+                  lark: {
+                    configured: larkConfigured,
+                    running: larkConfigured,
+                    port: larkCfg?.webhookPort ?? 18792,
+                  },
                 },
                 undefined,
               );
+              break;
+            }
+            case "channels.lark.reload": {
+              // Hot-reload Lark provider after config change (mirrors openfang channel configure flow)
+              const cfg = loadConfig();
+              if (!cfg.lark?.appId || !cfg.lark?.appSecret) {
+                respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "Lark not configured (appId + appSecret required)"));
+                break;
+              }
+              if (cfg.lark.enabled === false) {
+                respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "Lark disabled in config"));
+                break;
+              }
+              try {
+                await stopLarkProvider().catch(() => { /* ignore if not running */ });
+                await startLarkProvider();
+                logLark.info("provider reloaded via channels.lark.reload");
+                respond(true, { ok: true, port: cfg.lark.webhookPort ?? 18792, running: true });
+              } catch (err) {
+                logLark.error(`reload failed: ${formatError(err)}`);
+                respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Lark reload failed: ${formatError(err)}`));
+              }
               break;
             }
             case "chat.history": {
@@ -4416,6 +4462,14 @@ export async function startGatewayServer(
               await stopTelegramProvider();
               startTelegramProvider().catch((err) => {
                 logTelegram.error(`config update telegram spawn failed: ${formatError(err)}`);
+              });
+              stopLarkProvider().catch(() => { /* ignore */ }).then(() => {
+                const newCfg = loadConfig();
+                if (newCfg.lark?.appId && newCfg.lark?.appSecret && newCfg.lark?.enabled !== false) {
+                  startLarkProvider()
+                    .then(() => logLark.info("provider restarted after config update"))
+                    .catch((err) => logLark.error(`config update lark spawn failed: ${formatError(err)}`));
+                }
               });
               respond(
                 true,
@@ -5901,6 +5955,7 @@ export async function startGatewayServer(
         }
       }
       await stopTelegramProvider();
+      await stopLarkProvider().catch(() => { /* ignore */ });
       await stopGmailWatcher();
       try { resetMcpManager(); } catch { /* ignore */ }
       cron.stop();

@@ -499,11 +499,13 @@ var OpenFangAPI = (function() {
   function _sessionDisplayName(key, lastChannel) {
     if (key === 'webui') return 'WebUI Chat';
     if (key === 'telegram' || key === 'main') return 'Telegram';
+    if (key === 'lark') return 'Lark';
     return key;
   }
   function _sessionChannel(key, lastChannel) {
     if (key === 'webui') return 'webui';
     if (key === 'telegram' || key === 'main') return 'telegram';
+    if (key === 'lark') return 'lark';
     return lastChannel || 'telegram';
   }
 
@@ -1043,13 +1045,13 @@ var OpenFangAPI = (function() {
     return Promise.resolve({ valid: true, entries: _auditLog.length });
   }
 
-  // channels — openclaw only has Telegram; derive from providers.status
+  // channels — openclaw has Telegram + Lark; derive status from providers.status / config
   function getChannels() {
-    // Build the base Telegram channel definition (always shown so user can configure it)
     var baseTelegramChannel = {
       name: 'telegram',
       display_name: 'Telegram',
       description: 'Receive and send messages via Telegram bot',
+      icon: '✈️',
       category: 'messaging',
       configured: false,
       has_token: false,
@@ -1057,19 +1059,50 @@ var OpenFangAPI = (function() {
       setup_type: 'form',
       difficulty: 'Easy',
       fields: [
-        { key: 'bot_token', label: 'Bot Token', type: 'secret', advanced: false }
+        { key: 'bot_token', label: 'Bot Token', type: 'secret', placeholder: '123456:ABC-DEF...', advanced: false }
       ]
     };
+    var baseLarkChannel = {
+      name: 'lark',
+      display_name: 'Lark / Feishu',
+      description: 'Receive and send messages via Lark (Feishu) bot webhook',
+      icon: '🪶',
+      category: 'enterprise',
+      configured: false,
+      has_token: false,
+      connected: false,
+      setup_type: 'form',
+      difficulty: 'Medium',
+      fields: [
+        { key: 'app_id',     label: 'App ID',     type: 'text',   placeholder: 'cli_xxxxxxxxxx',  advanced: false },
+        { key: 'app_secret', label: 'App Secret', type: 'secret', placeholder: 'your-app-secret', advanced: false },
+        { key: 'webhook_port', label: 'Webhook Port', type: 'text', placeholder: '18792', advanced: true },
+        { key: 'verification_token', label: 'Verification Token', type: 'secret', placeholder: 'optional', advanced: true }
+      ]
+    };
+
     return request('providers.status').then(function(p) {
+      // Telegram status
       var tg = (p && p.telegram) || {};
-      var configured = !!(tg.configured || tg.token || tg.botToken || tg.bot_token);
-      baseTelegramChannel.configured = configured;
-      baseTelegramChannel.has_token = configured;
-      baseTelegramChannel.connected = !!(tg.running && configured);
-      return { channels: [baseTelegramChannel] };
+      var tgConfigured = !!(tg.configured || tg.token || tg.botToken || tg.bot_token);
+      baseTelegramChannel.configured = tgConfigured;
+      baseTelegramChannel.has_token  = tgConfigured;
+      baseTelegramChannel.connected  = !!(tg.running && tgConfigured);
+
+      // Lark status — derive from config.get since providers.status has no lark key yet
+      return request('config.get', {}).then(function(cfg) {
+        var larkCfg = (cfg && cfg.config && cfg.config.lark) || {};
+        var larkConfigured = !!(larkCfg.appId && larkCfg.appSecret);
+        baseLarkChannel.configured = larkConfigured;
+        baseLarkChannel.has_token  = larkConfigured;
+        baseLarkChannel.connected  = !!(larkCfg.enabled !== false && larkConfigured);
+        return { channels: [baseTelegramChannel, baseLarkChannel] };
+      }).catch(function() {
+        return { channels: [baseTelegramChannel, baseLarkChannel] };
+      });
     }).catch(function() {
-      // Even if providers.status fails, still show Telegram channel (unconfigured)
-      return { channels: [baseTelegramChannel] };
+      // providers.status failed — still show both channels unconfigured
+      return { channels: [baseTelegramChannel, baseLarkChannel] };
     });
   }
 
@@ -1481,19 +1514,42 @@ var OpenFangAPI = (function() {
       return Promise.reject(new Error('GitHub Copilot OAuth not supported'));
     }
 
-    // channels
+    // channels — POST /api/channels/{name}/configure
     if (path.startsWith('/api/channels/') && path.endsWith('/configure')) {
       var chName = path.split('/')[3];
       if (chName === 'telegram') {
-        // body.fields may have {bot_token, telegram_bot_token, token, ...}
         var fields = body.fields || body;
         var botToken = fields.bot_token || fields.telegram_bot_token || fields.token || fields.botToken || '';
         if (!botToken) return Promise.reject(new Error('bot token required'));
         return configPatch({ telegram: { enabled: true, botToken: botToken } });
       }
+      if (chName === 'lark') {
+        var fields = body.fields || body;
+        var appId     = fields.app_id     || fields.appId     || '';
+        var appSecret = fields.app_secret || fields.appSecret || '';
+        if (!appId || !appSecret) return Promise.reject(new Error('App ID and App Secret are required'));
+        var patch = { lark: { enabled: true, appId: appId, appSecret: appSecret } };
+        if (fields.webhook_port)        patch.lark.webhookPort        = parseInt(fields.webhook_port, 10) || 18792;
+        if (fields.verification_token)  patch.lark.verificationToken  = fields.verification_token;
+        return configPatch(patch).then(function() {
+          // Hot-reload: start Lark provider immediately after saving config
+          return request('channels.lark.reload', {}).catch(function(e) {
+            console.warn('[lark] reload after configure failed:', e);
+          });
+        }).then(function() { return { ok: true }; });
+      }
       return Promise.resolve({ ok: true });
     }
+    // channels — POST /api/channels/{name}/test
     if (path.startsWith('/api/channels/') && path.endsWith('/test')) {
+      var chName = path.split('/')[3];
+      if (chName === 'lark') {
+        return request('channels.lark.reload', {}).then(function(r) {
+          return { status: 'ok', message: 'Lark webhook listening on port ' + (r.port || 18792) };
+        }).catch(function(e) {
+          return Promise.reject(new Error('Lark start failed: ' + (e.message || e)));
+        });
+      }
       return request('providers.status').then(function(p) {
         var tg = (p && p.telegram) || {};
         var ok = !!(tg.running || tg.configured);
@@ -1760,11 +1816,16 @@ var OpenFangAPI = (function() {
         });
     }
 
-    // ── channels ── DELETE /api/channels/{name}/configure → remove telegram token
+    // ── channels ── DELETE /api/channels/{name}/configure
     if (parts[2] === 'channels' && parts[4] === 'configure') {
       var chName = parts[3];
       if (chName === 'telegram') {
         return configPatch({ telegram: { enabled: false, botToken: null } }).catch(function() {
+          return Promise.resolve({ ok: true });
+        });
+      }
+      if (chName === 'lark') {
+        return configPatch({ lark: { enabled: false, appId: null, appSecret: null } }).catch(function() {
           return Promise.resolve({ ok: true });
         });
       }

@@ -36,6 +36,8 @@ function sessionsPage() {
           // Display name mapping
           if (key === 'telegram' || key === 'main') {
             s.agent_name = 'Telegram';
+          } else if (key === 'lark') {
+            s.agent_name = 'Lark';
           } else if (key === 'webui') {
             s.agent_name = 'WebUI Chat';
           } else {

@@ -339,6 +339,44 @@ export async function runEmbeddedPiAgent(params: {
             prior = prior.slice(cutOff);
           }
         }
+        // Sanitize: remove all broken assistant messages (empty content or stopReason=error)
+        // anywhere in history — failed/aborted runs persist these and corrupt turn ordering
+        // for providers that validate message structure (Gemini, Claude, etc).
+        prior = prior.filter((msg) => {
+          const m = msg as { role?: string; stopReason?: string; content?: unknown[] };
+          if (m.role === "assistant" && (!m.content?.length || m.stopReason === "error")) {
+            return false;
+          }
+          return true;
+        });
+        // Sanitize: strip thoughtSignature from toolCall blocks in history.
+        // Gemini thinking signatures are only valid within the same turn — replaying them
+        // in a resumed session causes "function call turn comes immediately after user turn".
+        // Fix mirrors openfang/gemini.rs: skip thinking blocks on history replay.
+        prior = prior.map((msg) => {
+          const m = msg as { role?: string; content?: unknown[] };
+          if (m.role !== "assistant" || !m.content?.length) return msg;
+          const hasThoughtSig = m.content.some(
+            (b) => (b as { thoughtSignature?: unknown }).thoughtSignature,
+          );
+          if (!hasThoughtSig) return msg;
+          const stripped = {
+            ...m,
+            content: m.content.map((b) => {
+              const block = b as Record<string, unknown>;
+              if (!block.thoughtSignature) return b;
+              const { thoughtSignature: _sig, ...rest } = block;
+              return rest;
+            }),
+          };
+          // Cast back — we only removed an extra field, structure is still compatible
+          return stripped as typeof msg;
+        });
+        // Sanitize: history must start with a user turn. Drop any leading non-user messages
+        // (orphaned toolResult/assistant after pruning or broken serialization).
+        while (prior.length > 0 && (prior[0] as { role?: string }).role !== "user") {
+          prior = prior.slice(1);
+        }
         // ----------------------------------
 
         if (prior.length > 0) {
