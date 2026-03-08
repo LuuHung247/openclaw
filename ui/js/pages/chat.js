@@ -818,10 +818,13 @@ function chatPage() {
 
         case 'tool_start':
           var lastMsg = this.messages.length ? this.messages[this.messages.length - 1] : null;
-          if (lastMsg && lastMsg.streaming) {
-            if (!lastMsg.tools) lastMsg.tools = [];
-            lastMsg.tools.push({ id: data.tool + '-' + Date.now(), name: data.tool, running: true, expanded: false, input: '', result: '', is_error: false });
+          // Create a streaming agent message if there isn't one yet (tool called before any text)
+          if (!lastMsg || !lastMsg.streaming || lastMsg.role !== 'agent') {
+            this.messages.push({ id: ++msgId, role: 'agent', text: '', meta: '', streaming: true, tools: [], _thinking: '', _thinkOpen: false });
+            lastMsg = this.messages[this.messages.length - 1];
           }
+          if (!lastMsg.tools) lastMsg.tools = [];
+          lastMsg.tools.push({ id: data.toolCallId || (data.tool + '-' + Date.now()), name: data.tool, running: true, expanded: false, input: '', result: '', is_error: false });
           this.scrollToBottom();
           break;
 
@@ -843,7 +846,10 @@ function chatPage() {
           var lastMsg3 = this.messages.length ? this.messages[this.messages.length - 1] : null;
           if (lastMsg3 && lastMsg3.tools) {
             for (var ri = lastMsg3.tools.length - 1; ri >= 0; ri--) {
-              if (lastMsg3.tools[ri].name === data.tool && lastMsg3.tools[ri].running) {
+              var toolCardId = data.toolCallId || null;
+              var nameMatch = lastMsg3.tools[ri].name === data.tool;
+              var idMatch = toolCardId && lastMsg3.tools[ri].id === toolCardId;
+              if ((idMatch || (!toolCardId && nameMatch)) && lastMsg3.tools[ri].running) {
                 lastMsg3.tools[ri].running = false;
                 lastMsg3.tools[ri].result = data.result || '';
                 lastMsg3.tools[ri].is_error = !!data.is_error;

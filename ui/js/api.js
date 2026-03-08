@@ -1176,24 +1176,34 @@ var OpenFangAPI = (function() {
     return Promise.resolve({ ok: true });
   }
 
-  // mcp servers — derive from skills that act as MCP providers
-  function getMcpServers() {
-    return getSkills().then(function(data) {
-      var mcpSkills = (data.skills || []).filter(function(s) {
-        var name = (s.name || '').toLowerCase();
-        return name.indexOf('mcp') !== -1 || name.indexOf('server') !== -1;
+  // ── MCP REST helpers — call gateway HTTP directly (not via WebSocket) ──
+  var GW_HTTP = 'http://' + window.location.hostname + ':' + GW_PORT;
+
+  function mcpHttpFetch(method, path, body) {
+    var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    if (_authToken) opts.headers['Authorization'] = 'Bearer ' + _authToken;
+    else if (_authPassword) opts.headers['X-Gateway-Password'] = _authPassword;
+    return fetch(GW_HTTP + path, opts).then(function(r) {
+      return r.json().then(function(data) {
+        if (!r.ok) return Promise.reject(new Error(data.error || ('HTTP ' + r.status)));
+        return data;
       });
-      return {
-        configured: mcpSkills.map(function(s) {
-          return { name: s.name, description: s.description, enabled: s.enabled, status: s.eligible ? 'ok' : 'missing_deps' };
-        }),
-        connected: mcpSkills.filter(function(s) { return s.eligible && s.enabled; }).map(function(s) { return s.name; }),
-        total_configured: mcpSkills.length,
-        total_connected: mcpSkills.filter(function(s) { return s.eligible && s.enabled; }).length
-      };
-    }).catch(function() {
+    });
+  }
+
+  function getMcpServers() {
+    return mcpHttpFetch('GET', '/api/mcp/servers').catch(function() {
       return { configured: [], connected: [], total_configured: 0, total_connected: 0 };
     });
+  }
+
+  function addMcpServer(payload) {
+    return mcpHttpFetch('POST', '/api/mcp/servers', payload);
+  }
+
+  function removeMcpServer(name) {
+    return mcpHttpFetch('DELETE', '/api/mcp/servers/' + encodeURIComponent(name));
   }
 
 
@@ -1570,6 +1580,9 @@ var OpenFangAPI = (function() {
       return Promise.resolve({ status: 'failed', error: 'Migration endpoint not available in OpenClaw gateway.' });
     }
 
+    // mcp servers
+    if (path === '/api/mcp/servers') return addMcpServer(body);
+
     console.warn('[OpenClaw] Unmapped POST:', path);
     return Promise.reject(new Error('Not implemented: POST ' + path));
   }
@@ -1762,6 +1775,10 @@ var OpenFangAPI = (function() {
     if (parts[2] === 'memory' && parts[3] === 'agents' && parts[5] === 'kv' && parts[6])
       return deleteMemoryKvKey(parts[4], parts[6]);
 
+    // mcp servers — DELETE /api/mcp/servers/:name
+    if (parts[2] === 'mcp' && parts[3] === 'servers' && parts[4])
+      return removeMcpServer(decodeURIComponent(parts[4]));
+
     console.warn('[OpenClaw] Unmapped DELETE:', path);
     return Promise.reject(new Error('Not implemented: DELETE ' + path));
   }
@@ -1802,7 +1819,15 @@ var OpenFangAPI = (function() {
     if (event === 'chat') {
       var state = payload.state;
 
-      if (state === 'delta') {
+      if (state === 'tool_start') {
+        // Tool execution started — show collapsible card with spinner
+        var toolCallId = payload.toolCallId || '';
+        cb.onMessage({ type: 'tool_start', tool: payload.tool || '', toolCallId: toolCallId });
+      } else if (state === 'tool_result') {
+        // Tool execution completed — update card with result
+        var toolCallId2 = payload.toolCallId || '';
+        cb.onMessage({ type: 'tool_result', tool: payload.tool || '', toolCallId: toolCallId2, result: payload.result || '', is_error: !!payload.is_error });
+      } else if (state === 'delta') {
         // Gateway sends the current full text — SET (replace) the bubble content
         var fullText = payload.message && payload.message.content && payload.message.content[0] && payload.message.content[0].text || '';
         if (fullText) {

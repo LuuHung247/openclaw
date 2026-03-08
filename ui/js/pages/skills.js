@@ -25,8 +25,10 @@ function skillsPage() {
     detailLoading: false,
 
     // MCP servers
-    mcpServers: [],
+    mcpServers: { configured: [], connected: [], total_configured: 0, total_connected: 0 },
     mcpLoading: false,
+    mcpAdding: false,
+    mcpForm: { name: '', type: 'stdio', command: 'npx', args: '', url: '', env: '' },
 
     // Category definitions from the OpenClaw ecosystem
     categories: [
@@ -279,6 +281,54 @@ function skillsPage() {
         this.mcpServers = { configured: [], connected: [], total_configured: 0, total_connected: 0 };
       }
       this.mcpLoading = false;
+    },
+
+    // Add MCP server
+    async addMcpServer() {
+      var f = this.mcpForm;
+      if (!f.name.trim()) { OpenFangToast.error('Server name is required'); return; }
+      var transport;
+      if (f.type === 'stdio') {
+        if (!f.command.trim()) { OpenFangToast.error('Command is required for stdio'); return; }
+        var args = f.args.trim() ? f.args.trim().split(/\s+/) : [];
+        transport = { type: 'stdio', command: f.command.trim(), args: args };
+      } else {
+        if (!f.url.trim()) { OpenFangToast.error('URL is required for SSE'); return; }
+        transport = { type: 'sse', url: f.url.trim() };
+      }
+      var env = f.env.trim() ? f.env.trim().split('\n').map(function(l) { return l.trim(); }).filter(Boolean) : undefined;
+      var payload = { name: f.name.trim(), transport: transport };
+      if (env && env.length) payload.env = env;
+      this.mcpAdding = true;
+      try {
+        await OpenFangAPI.post('/api/mcp/servers', payload);
+        OpenFangToast.success('MCP server "' + payload.name + '" added');
+        this.mcpForm = { name: '', type: 'stdio', command: 'npx', args: '', url: '', env: '' };
+        await this.loadMcpServers();
+      } catch(e) {
+        OpenFangToast.error('Failed to add server: ' + (e.message || 'Unknown error'));
+      }
+      this.mcpAdding = false;
+    },
+
+    // Remove MCP server
+    removeMcpServer: function(name) {
+      var self = this;
+      OpenFangToast.confirm('Remove MCP Server', 'Remove MCP server "' + name + '"?', async function() {
+        try {
+          await OpenFangAPI.delete('/api/mcp/servers/' + encodeURIComponent(name));
+          OpenFangToast.success('MCP server "' + name + '" removed');
+          await self.loadMcpServers();
+        } catch(e) {
+          OpenFangToast.error('Failed to remove: ' + (e.message || 'Unknown error'));
+        }
+      });
+    },
+
+    // Get tools for a connected server by name
+    mcpConnectedTools: function(serverName) {
+      var found = (this.mcpServers.connected || []).find(function(s) { return s.name === serverName; });
+      return found ? (found.tools || []) : [];
     },
 
     // Category search on ClawHub

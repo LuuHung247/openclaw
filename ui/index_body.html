@@ -2990,88 +2990,114 @@
               </div>
 
               <!-- TAB: MCP Servers -->
-              <div x-show="tab === 'mcp'">
-                <div class="info-card">
-                  <h4>MCP Servers (Model Context Protocol)</h4>
-                  <p>MCP servers provide external tools to your agents &mdash; GitHub, filesystem, databases, APIs, and
-                    more. OpenFang is compatible with all OpenClaw MCP servers.</p>
-                  <p class="mt-2" style="font-size:0.8rem;color:var(--text-dim)">Configure MCP servers in your
-                    <code>config.toml</code> under <code>[mcp_servers]</code>.
-                  </p>
-                </div>
-                <div x-show="mcpLoading" class="loading-state">
-                  <div class="spinner"></div><span>Loading MCP servers...</span>
-                </div>
-                <div x-show="!mcpLoading">
-                  <!-- Connected servers -->
-                  <div x-show="mcpServers.total_connected > 0" class="mb-4">
-                    <div class="text-sm font-bold mb-2" style="color:var(--text-dim);letter-spacing:0.5px">CONNECTED
-                      SERVERS</div>
-                    <div class="card-grid">
-                      <template x-for="srv in mcpServers.connected" :key="srv.name">
-                        <div class="card">
-                          <div class="flex justify-between items-center mb-2">
-                            <div class="card-header" style="margin:0" x-text="srv.name"></div>
-                            <span class="badge badge-success">Connected</span>
-                          </div>
-                          <div class="card-meta" x-text="srv.tools_count + ' tool(s) available'"></div>
-                          <div class="mt-2" x-show="srv.tools && srv.tools.length">
-                            <div class="text-xs text-dim mb-1">Tools:</div>
-                            <template x-for="tool in srv.tools.slice(0, 10)" :key="tool.name">
-                              <div class="text-xs" style="padding:2px 0">
-                                <code x-text="tool.name" style="font-size:0.7rem"></code>
-                                <span class="text-dim" x-show="tool.description" x-text="' — ' + tool.description"
-                                  style="font-size:0.65rem"></span>
-                              </div>
-                            </template>
-                            <div class="text-xs text-dim" x-show="srv.tools.length > 10"
-                              x-text="'... and ' + (srv.tools.length - 10) + ' more'"></div>
-                          </div>
-                        </div>
-                      </template>
-                    </div>
-                  </div>
-                  <!-- Configured but not connected -->
-                  <div x-show="mcpServers.total_configured > 0" class="mb-4">
-                    <div class="text-sm font-bold mb-2" style="color:var(--text-dim);letter-spacing:0.5px">CONFIGURED
-                      SERVERS</div>
-                    <div class="card-grid">
-                      <template x-for="srv in mcpServers.configured" :key="srv.name">
-                        <div class="card card-unconfigured">
-                          <div class="flex justify-between items-center mb-2">
-                            <div class="card-header" style="margin:0" x-text="srv.name"></div>
-                            <span class="badge badge-dim" x-text="srv.transport.type"></span>
-                          </div>
-                          <div class="text-xs" x-show="srv.transport.type === 'stdio'">
-                            <code x-text="srv.transport.command + ' ' + (srv.transport.args || []).join(' ')"
-                              style="font-size:0.7rem"></code>
-                          </div>
-                          <div class="text-xs" x-show="srv.transport.type === 'sse'">
-                            <code x-text="srv.transport.url" style="font-size:0.7rem"></code>
-                          </div>
-                          <div class="text-xs text-dim mt-1" x-show="srv.env && srv.env.length"
-                            x-text="'Env: ' + srv.env.join(', ')"></div>
-                        </div>
-                      </template>
-                    </div>
-                  </div>
-                  <!-- Empty state -->
-                  <div class="empty-state"
-                    x-show="mcpServers.total_configured === 0 && mcpServers.total_connected === 0">
-                    <h4>No MCP servers configured</h4>
-                    <p class="hint">MCP servers extend your agents with external tools. Add servers to your config.toml:
-                    </p>
-                    <pre
-                      style="text-align:left;font-size:0.75rem;margin-top:8px;background:var(--bg-secondary);padding:12px;border-radius:6px;max-width:400px;margin-left:auto;margin-right:auto">[[mcp_servers]]
-name = "filesystem"
-timeout_secs = 30
+              <div x-show="tab === 'mcp'" x-data="{ addOpen: false }">
 
-[mcp_servers.transport]
-type = "stdio"
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
-                    <p class="hint mt-2" style="font-size:0.75rem">OpenFang supports all OpenClaw-compatible MCP
-                      servers.</p>
+                <!-- Header row: title + stats + Add button -->
+                <div class="flex justify-between items-center mb-3">
+                  <div>
+                    <div class="font-bold" style="font-size:1rem">MCP Servers</div>
+                    <div class="text-xs text-dim">External tools via Model Context Protocol — appear as <code>mcp_{name}_{tool}</code></div>
+                  </div>
+                  <button class="btn btn-primary btn-sm" @click="addOpen = !addOpen" style="white-space:nowrap">
+                    <span x-text="addOpen ? '✕ Cancel' : '+ Add Server'"></span>
+                  </button>
+                </div>
+
+                <!-- Collapsible add form -->
+                <div x-show="addOpen" x-transition class="card mb-4" style="background:var(--bg-secondary)">
+                  <div style="display:grid;gap:12px">
+                    <div style="display:grid;grid-template-columns:1fr 180px;gap:12px">
+                      <div>
+                        <label class="form-label">Name *</label>
+                        <input class="form-input" x-model="mcpForm.name" placeholder="e.g. github">
+                      </div>
+                      <div>
+                        <label class="form-label">Transport *</label>
+                        <select class="form-select" x-model="mcpForm.type">
+                          <option value="stdio">stdio (subprocess)</option>
+                          <option value="sse">SSE (HTTP)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div x-show="mcpForm.type === 'stdio'" style="display:grid;grid-template-columns:140px 1fr;gap:12px">
+                      <div>
+                        <label class="form-label">Command *</label>
+                        <input class="form-input" x-model="mcpForm.command" placeholder="npx">
+                      </div>
+                      <div>
+                        <label class="form-label">Args</label>
+                        <input class="form-input" x-model="mcpForm.args" placeholder="-y @modelcontextprotocol/server-github">
+                      </div>
+                    </div>
+                    <div x-show="mcpForm.type === 'sse'">
+                      <label class="form-label">URL *</label>
+                      <input class="form-input" x-model="mcpForm.url" placeholder="http://localhost:8080/mcp">
+                    </div>
+                    <div>
+                      <label class="form-label">Env vars to pass through (comma-separated)</label>
+                      <input class="form-input" x-model="mcpForm.env" placeholder="GITHUB_PERSONAL_ACCESS_TOKEN">
+                    </div>
+                    <div>
+                      <button class="btn btn-primary" @click="addMcpServer(); addOpen = false" :disabled="mcpAdding" style="min-width:120px">
+                        <span x-show="!mcpAdding">Connect</span>
+                        <span x-show="mcpAdding">Connecting…</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Loading -->
+                <div x-show="mcpLoading" class="loading-state">
+                  <div class="spinner"></div><span>Loading…</span>
+                </div>
+
+                <!-- Server list -->
+                <div x-show="!mcpLoading">
+                  <div x-show="mcpServers.total_configured > 0" class="card-grid">
+                    <template x-for="srv in mcpServers.configured" :key="srv.name">
+                      <div class="card" :class="srv.connected ? 'card-glow' : 'card-unconfigured'">
+                        <div class="flex justify-between items-start mb-2">
+                          <div>
+                            <div class="card-header" style="margin:0 0 2px 0" x-text="srv.name"></div>
+                            <div class="text-xs text-dim" x-show="srv.transport"
+                              x-text="srv.transport && srv.transport.type === 'stdio'
+                                ? srv.transport.command + ' ' + (srv.transport.args || []).join(' ')
+                                : (srv.transport && srv.transport.url || '')"></div>
+                          </div>
+                          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;margin-left:8px">
+                            <span class="badge" :class="srv.connected ? 'badge-success' : 'badge-dim'"
+                              x-text="srv.connected ? 'Connected' : 'Offline'"></span>
+                            <button class="btn btn-sm" style="padding:1px 6px;font-size:0.7rem;color:var(--danger);background:transparent;border:none"
+                              @click="removeMcpServer(srv.name)" title="Remove">✕</button>
+                          </div>
+                        </div>
+                        <!-- Env -->
+                        <div class="text-xs text-dim" x-show="srv.env && srv.env.length"
+                          x-text="(srv.env || []).join(', ')"></div>
+                        <!-- Error -->
+                        <div class="text-xs mt-1" style="color:var(--danger)" x-show="srv.error" x-text="srv.error"></div>
+                        <!-- Tools -->
+                        <div x-show="srv.connected && mcpConnectedTools(srv.name).length > 0" class="mt-2"
+                          style="border-top:1px solid var(--border);padding-top:6px">
+                          <div class="text-xs text-dim mb-1" x-text="mcpConnectedTools(srv.name).length + ' tool(s)'"></div>
+                          <div style="display:flex;flex-wrap:wrap;gap:3px">
+                            <template x-for="tool in mcpConnectedTools(srv.name).slice(0, 6)" :key="tool.name">
+                              <code class="text-xs" style="font-size:0.65rem;background:var(--bg-tertiary,var(--bg-secondary));padding:1px 5px;border-radius:3px" x-text="tool.name"></code>
+                            </template>
+                            <span class="text-xs text-dim" x-show="mcpConnectedTools(srv.name).length > 6"
+                              x-text="'+' + (mcpConnectedTools(srv.name).length - 6) + ' more'"></span>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+
+                  <!-- Empty state -->
+                  <div class="empty-state" x-show="mcpServers.total_configured === 0">
+                    <div style="font-size:2rem;margin-bottom:8px">⚙️</div>
+                    <h4>No MCP servers connected</h4>
+                    <p class="hint">Click <strong>+ Add Server</strong> to connect an MCP server.</p>
+                    <p class="hint" style="margin-top:6px;font-size:0.75rem">Popular: <code>@modelcontextprotocol/server-github</code> &nbsp;·&nbsp; <code>@upstash/context7-mcp</code> &nbsp;·&nbsp; <code>@modelcontextprotocol/server-filesystem</code></p>
                   </div>
                 </div>
               </div>

@@ -147,6 +147,12 @@ import {
   resolveHookMappings,
 } from "./hooks-mapping.js";
 import { GATEWAY_DEFAULT_PORT } from "./constants.js";
+import {
+  handleMcpList,
+  handleMcpAdd,
+  handleMcpRemove,
+} from "./handlers/mcp-handlers.js";
+import { getMcpManager, resetMcpManager } from "../agents/mcp-manager.js";
 
 ensureClawdisCliOnPath();
 
@@ -1138,6 +1144,12 @@ export async function startGatewayServer(
     allowTailscale,
   };
   const hooksConfig = resolveHooksConfig(cfgAtStart);
+
+  // Connect MCP servers defined in config (non-blocking — failures are logged, not thrown)
+  if (cfgAtStart.mcp_servers?.length) {
+    void getMcpManager().init(cfgAtStart.mcp_servers);
+  }
+
   assertGatewayAuthConfigured(resolvedAuth);
   if (tailscaleMode === "funnel" && authMode !== "password") {
     throw new Error(
@@ -1596,6 +1608,39 @@ export async function startGatewayServer(
     return false;
   };
 
+  // ── MCP REST API handler (/api/mcp/servers) ──
+  const handleMcpRequest = async (
+    req: IncomingMessage,
+    res: import("node:http").ServerResponse,
+  ): Promise<boolean> => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const pathname = url.pathname;
+    if (!pathname.startsWith("/api/mcp/")) return false;
+
+    const cfg = loadConfig();
+    const method = req.method?.toUpperCase() ?? "GET";
+
+    // GET /api/mcp/servers
+    if (pathname === "/api/mcp/servers" && method === "GET") {
+      handleMcpList(res, cfg);
+      return true;
+    }
+    // POST /api/mcp/servers
+    if (pathname === "/api/mcp/servers" && method === "POST") {
+      await handleMcpAdd(req, res, cfg);
+      return true;
+    }
+    // DELETE /api/mcp/servers/:name
+    if (pathname.startsWith("/api/mcp/servers/") && method === "DELETE") {
+      const name = decodeURIComponent(pathname.slice("/api/mcp/servers/".length));
+      if (name) {
+        await handleMcpRemove(res, name, cfg);
+        return true;
+      }
+    }
+    return false;
+  };
+
   const httpServer: HttpServer = createHttpServer((req, res) => {
     // Don't interfere with WebSocket upgrades; ws handles the 'upgrade' event.
     if (String(req.headers.upgrade ?? "").toLowerCase() === "websocket") return;
@@ -1603,6 +1648,7 @@ export async function startGatewayServer(
     void (async () => {
       if (await handleUiRequest(req, res)) return;
       if (handleAuditRequest(req, res)) return;
+      if (await handleMcpRequest(req, res)) return;
       if (await handleHooksRequest(req, res)) return;
 
       res.statusCode = 404;
@@ -3297,6 +3343,22 @@ export async function startGatewayServer(
             broadcast("chat", payload, { dropIfSlow: true });
             bridgeSendToSession(sessionKey, "chat", payload);
           }
+        } else if (evt.stream === "tool" && typeof evt.data?.phase === "string") {
+          const phase = evt.data.phase as string;
+          const toolName = (evt.data.name as string | undefined) ?? "unknown";
+          const toolCallId = (evt.data.toolCallId as string | undefined) ?? "";
+          const base = { runId: clientRunId, sessionKey, seq: evt.seq };
+          if (phase === "start") {
+            const toolPayload = { ...base, state: "tool_start" as const, tool: toolName, toolCallId };
+            broadcast("chat", toolPayload, { dropIfSlow: true });
+            bridgeSendToSession(sessionKey, "chat", toolPayload);
+          } else if (phase === "result") {
+            const meta = (evt.data.meta as string | undefined) ?? "";
+            const isError = Boolean(evt.data.isError);
+            const toolPayload = { ...base, state: "tool_result" as const, tool: toolName, toolCallId, result: meta, is_error: isError };
+            broadcast("chat", toolPayload, { dropIfSlow: true });
+            bridgeSendToSession(sessionKey, "chat", toolPayload);
+          }
         } else if (jobState === "done" || jobState === "error") {
           const finished = shiftChatRun(evt.runId);
           if (!finished) {
@@ -3367,6 +3429,22 @@ export async function startGatewayServer(
             };
             broadcast("chat", payload, { dropIfSlow: true });
             bridgeSendToSession(sessionKey, "chat", payload);
+          }
+        } else if (evt.stream === "tool" && typeof evt.data?.phase === "string") {
+          const phase = evt.data.phase as string;
+          const toolName = (evt.data.name as string | undefined) ?? "unknown";
+          const toolCallId = (evt.data.toolCallId as string | undefined) ?? "";
+          const base = { runId: clientRunId, sessionKey, seq: evt.seq };
+          if (phase === "start") {
+            const toolPayload = { ...base, state: "tool_start" as const, tool: toolName, toolCallId };
+            broadcast("chat", toolPayload, { dropIfSlow: true });
+            bridgeSendToSession(sessionKey, "chat", toolPayload);
+          } else if (phase === "result") {
+            const meta = (evt.data.meta as string | undefined) ?? "";
+            const isError = Boolean(evt.data.isError);
+            const toolPayload = { ...base, state: "tool_result" as const, tool: toolName, toolCallId, result: meta, is_error: isError };
+            broadcast("chat", toolPayload, { dropIfSlow: true });
+            bridgeSendToSession(sessionKey, "chat", toolPayload);
           }
         } else if (jobState === "done" || jobState === "error") {
           const base = {
@@ -5824,6 +5902,7 @@ export async function startGatewayServer(
       }
       await stopTelegramProvider();
       await stopGmailWatcher();
+      try { resetMcpManager(); } catch { /* ignore */ }
       cron.stop();
       heartbeatRunner.stop();
       broadcast("shutdown", {

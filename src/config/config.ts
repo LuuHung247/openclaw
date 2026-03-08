@@ -497,6 +497,22 @@ export type ModelsConfig = {
   providers?: Record<string, ModelProviderConfig>;
 };
 
+// ─── MCP server configuration ────────────────────────────────────────────────
+
+export type McpTransportConfig =
+  | { type: "stdio"; command: string; args?: string[] }
+  | { type: "sse"; url: string };
+
+export type McpServerConfig = {
+  /** Unique name, used as tool prefix: mcp_{name}_{tool} */
+  name: string;
+  transport: McpTransportConfig;
+  /** Environment variable names to pass through to the subprocess. */
+  env?: string[];
+  /** Request timeout in seconds (default: 30). */
+  timeout_secs?: number;
+};
+
 export type ClawdisConfig = {
   identity?: {
     name?: string;
@@ -600,6 +616,8 @@ export type ClawdisConfig = {
   canvasHost?: CanvasHostConfig;
   talk?: TalkConfig;
   gateway?: GatewayConfig;
+  /** MCP servers to connect on startup. Tools exposed as mcp_{name}_{tool}. */
+  mcp_servers?: McpServerConfig[];
 };
 
 /**
@@ -1244,6 +1262,19 @@ const ClawdisSchema = z.object({
         )
         .optional(),
     })
+    .optional(),
+  mcp_servers: z
+    .array(
+      z.object({
+        name: z.string(),
+        transport: z.discriminatedUnion("type", [
+          z.object({ type: z.literal("stdio"), command: z.string(), args: z.array(z.string()).optional() }),
+          z.object({ type: z.literal("sse"), url: z.string() }),
+        ]),
+        env: z.array(z.string()).optional(),
+        timeout_secs: z.number().optional(),
+      }),
+    )
     .optional(),
 });
 

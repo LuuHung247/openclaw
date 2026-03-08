@@ -9,6 +9,7 @@ import {
   type ProcessToolDefaults,
 } from "./bash-tools.js";
 import { createClawdisTools } from "./clawdis-tools.js";
+import { getMcpManager } from "./mcp-manager.js";
 import { sanitizeToolResultImages } from "./tool-images.js";
 
 // NOTE(steipete): Upstream read now does file-magic MIME detection; we keep the wrapper
@@ -255,11 +256,14 @@ export function createClawdisCodingTools(options?: {
     ? createClawdisTools().filter((t) => !disabled.has(t.name))
     : createClawdisTools();
 
+  const mcpTools = getMcpManager().buildAgentTools();
+
   const tools: AnyAgentTool[] = [
     ...base,
     bashTool as unknown as AnyAgentTool,
     processTool as unknown as AnyAgentTool,
     ...clawdisTools,
+    ...mcpTools,
   ];
   return tools.map(normalizeToolParameters);
 }
