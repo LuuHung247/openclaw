@@ -678,7 +678,10 @@ function chatPage() {
         if (self.sending) return;
         var historyMessages = [];
         msgs.forEach(function(m) {
-          var role = m.role === 'user' ? 'user' : 'agent';
+          // Only render user and assistant turns — skip toolResult, thinking-only, etc.
+          var msgRole = m.role;
+          if (msgRole !== 'user' && msgRole !== 'assistant') return;
+          var role = msgRole === 'user' ? 'user' : 'agent';
           var rawText = '';
           if (typeof m.content === 'string') {
             rawText = m.content;
@@ -689,8 +692,8 @@ function chatPage() {
               .join('');
           }
           var parsed = extractThinking(rawText);
-          // Skip messages with no visible content
-          if (!parsed.text.trim() && !parsed.thinking) return;
+          // Skip messages with no visible text (thinking-only intermediate turns)
+          if (!parsed.text.trim()) return;
           var entry = { id: ++msgId, role: role, text: parsed.text, meta: '', tools: [], _thinking: parsed.thinking || '', _thinkOpen: false };
           historyMessages.push(entry);
         });
@@ -1103,7 +1106,7 @@ function chatPage() {
             message: finalText,
             idempotencyKey: idemKey,
             thinking: this.thinkingMode !== 'off' ? this.thinkingMode : undefined,
-            timeoutMs: 30000
+            timeoutMs: 600000
           };
           if (uploadedFiles && uploadedFiles.length) chatParams.attachments = uploadedFiles;
           // chat.send blocks until agent run completes; 'chat' events stream in the meantime

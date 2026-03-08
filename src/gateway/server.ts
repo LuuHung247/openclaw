@@ -2710,8 +2710,8 @@ export async function startGatewayServer(
             idempotencyKey: string;
           };
           const timeoutMs = Math.min(
-            Math.max(p.timeoutMs ?? 120_000, 0),
-            120_000,
+            Math.max(p.timeoutMs ?? 600_000, 0),
+            600_000,
           );
           const normalizedAttachments =
             p.attachments?.map((a) => ({
