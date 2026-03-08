@@ -4,7 +4,9 @@
 function agentsPage() {
   return {
     tab: 'agents',
-    activeChatAgent: null,
+    // activeChatAgent proxied through store so it survives tab navigation
+    get activeChatAgent() { return Alpine.store('app').activeChatAgent; },
+    set activeChatAgent(v) { Alpine.store('app').activeChatAgent = v; },
     // -- Agents state --
     showSpawnModal: false,
     showDetailModal: false,

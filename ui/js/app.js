@@ -103,6 +103,10 @@ document.addEventListener('alpine:init', function() {
     pendingAgent: null,
     focusMode: localStorage.getItem('openclaw-focus') === 'true',
     showAuthPrompt: false,
+    // Persist chat state across tab navigation (Alpine x-if unmounts components)
+    chatMessages: [],
+    chatAgentId: null,
+    activeChatAgent: null,
 
     toggleFocusMode() {
       this.focusMode = !this.focusMode;

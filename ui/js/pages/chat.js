@@ -8,11 +8,36 @@ function parseModelName(model) {
   return idx >= 0 ? model.slice(idx + 1) : model;
 }
 
+// Extract <think>...</think> content and return { thinking, text }.
+// Handles both closed tags and unclosed (still-streaming) open tag at end of text.
+function extractThinking(raw) {
+  if (!raw || raw.indexOf('<think>') === -1) return { thinking: '', text: raw || '' };
+  var thinking = '';
+  var text = raw;
+
+  // Closed blocks: <think>...</think>
+  var closedRe = /<think>([\s\S]*?)<\/think>/g;
+  var m;
+  while ((m = closedRe.exec(raw)) !== null) thinking += m[1];
+  text = text.replace(/<think>[\s\S]*?<\/think>/g, '');
+
+  // Unclosed open tag (still streaming): everything after last <think>
+  var openIdx = text.lastIndexOf('<think>');
+  if (openIdx !== -1) {
+    thinking += text.slice(openIdx + 7);
+    text = text.slice(0, openIdx);
+  }
+
+  return { thinking: thinking.trim(), text: text.replace(/^\s+/, '') };
+}
+
 function chatPage() {
   var msgId = 0;
   return {
     currentAgent: null,
-    messages: [],
+    // messages proxied through Alpine store so they survive tab navigation
+    get messages() { return Alpine.store('app').chatMessages; },
+    set messages(v) { Alpine.store('app').chatMessages = v; },
     inputText: '',
     sending: false,
     messageQueue: [],    // Queue for messages sent while streaming
@@ -114,10 +139,10 @@ function chatPage() {
         }
       });
 
-      // Load session + session list when agent changes
+      // Load session list when agent changes.
+      // History is loaded by connectWs.onOpen via loadChatHistory (single source of truth).
       this.$watch('currentAgent', function(agent) {
         if (agent) {
-          self.loadSession(agent.id);
           self.loadSessions(agent.id);
         }
       });
@@ -142,6 +167,10 @@ function chatPage() {
             self.currentAgent.model_provider = '';
             self.currentAgent.model_name = parseModelName(model);
           }
+          // Notify user in chat that model changed; suggest /new if they want a fresh context
+          var displayModel = parseModelName(model) || model;
+          self.messages.push({ id: ++msgId, role: 'system', text: 'Model switched to **' + displayModel + '**. Use `/new` to start a fresh session with this model.', meta: '', tools: [] });
+          self.scrollToBottom();
         }).catch(function() {});
       });
 
@@ -465,7 +494,13 @@ function chatPage() {
 
     selectAgent(agent) {
       this.currentAgent = agent;
-      this.messages = [];
+      // Only clear messages when switching to a different agent.
+      // When returning to the same agent after tab navigation, currentAgent was null
+      // (x-if unmounted the component) but the store still has the correct agentId.
+      if (Alpine.store('app').chatAgentId !== agent.id) {
+        this.messages = [];
+        Alpine.store('app').chatAgentId = agent.id;
+      }
       this.connectWs(agent.id);
       // Show welcome tips on first use
       if (!localStorage.getItem('of-chat-tips-seen')) {
@@ -497,6 +532,8 @@ function chatPage() {
 
     async loadSession(agentId) {
       var self = this;
+      // Guard: avoid overwriting messages already populated by loadChatHistory (race on refresh)
+      if (self.messages.length) return;
       try {
         var data = await OpenFangAPI.get('/api/agents/' + agentId + '/session');
         if (data.messages && data.messages.length) {
@@ -545,7 +582,7 @@ function chatPage() {
               });
 
               var text = self.sanitizeToolText(role === 'user' ? stripEnvelopePrefix(textParts.join('\n')) : textParts.join('\n'));
-              parsed.push({ id: ++msgId, role: role, text: text, meta: '', tools: tools });
+              parsed.push({ id: ++msgId, role: role, text: text, meta: '', tools: tools, _thinking: '', _thinkOpen: false });
             } else {
               // Plain string content
               var rawText2 = extractContentText(content);
@@ -553,7 +590,7 @@ function chatPage() {
               var tools2 = (m.tools || []).map(function(t, idx2) {
                 return { id: (t.name || 'tool') + '-hist-' + idx2, name: t.name || 'unknown', running: false, expanded: false, input: t.input || '', result: t.result || '', is_error: !!t.is_error };
               });
-              parsed.push({ id: ++msgId, role: role, text: text2, meta: '', tools: tools2 });
+              parsed.push({ id: ++msgId, role: role, text: text2, meta: '', tools: tools2, _thinking: '', _thinkOpen: false });
             }
           });
           self.messages = parsed;
@@ -580,8 +617,8 @@ function chatPage() {
           label: label.trim() || undefined
         });
         await this.loadSessions(this.currentAgent.id);
-        await this.loadSession(this.currentAgent.id);
         this.messages = [];
+        await this.loadSession(this.currentAgent.id);
         this.scrollToBottom();
         if (typeof OpenFangToast !== 'undefined') OpenFangToast.success('New session created');
       } catch(e) {
@@ -606,13 +643,19 @@ function chatPage() {
     },
 
     connectWs(agentId) {
-      if (this._wsAgent === agentId) return;
+      // _wsAgent is local state — lost on component remount (x-if).
+      // Also skip if the WS is already connected to this agent.
+      if (this._wsAgent === agentId && OpenFangAPI.isWsConnected()) return;
       this._wsAgent = agentId;
       var self = this;
 
       OpenFangAPI.wsConnect(agentId, {
         onOpen: function() {
           Alpine.store('app').wsConnected = true;
+          // Always reload history on (re)connect to pick up any server-side changes
+          // (e.g. model switch created a new session, browser refresh cleared store).
+          // loadChatHistory will only replace messages if server returns non-empty data.
+          self.loadChatHistory(agentId);
         },
         onMessage: function(data) { self.handleWsMessage(data); },
         onClose: function() {
@@ -626,6 +669,45 @@ function chatPage() {
       });
     },
 
+    loadChatHistory(agentId) {
+      var self = this;
+      OpenFangAPI.request('chat.history', { sessionKey: agentId, limit: 100 }).then(function(res) {
+        var msgs = (res && res.messages) || [];
+        if (!msgs.length) return;
+        // Skip if agent is currently streaming — don't overwrite live messages
+        if (self.sending) return;
+        var historyMessages = [];
+        msgs.forEach(function(m) {
+          var role = m.role === 'user' ? 'user' : 'agent';
+          var rawText = '';
+          if (typeof m.content === 'string') {
+            rawText = m.content;
+          } else if (Array.isArray(m.content)) {
+            rawText = m.content
+              .filter(function(b) { return b.type === 'text'; })
+              .map(function(b) { return b.text || ''; })
+              .join('');
+          }
+          var parsed = extractThinking(rawText);
+          // Skip messages with no visible content
+          if (!parsed.text.trim() && !parsed.thinking) return;
+          var entry = { id: ++msgId, role: role, text: parsed.text, meta: '', tools: [], _thinking: parsed.thinking || '', _thinkOpen: false };
+          historyMessages.push(entry);
+        });
+        if (historyMessages.length) {
+          // Don't replace if the user just sent a message (within 10s) — avoids
+          // the history response overwriting a newly-pushed user message bubble.
+          var hasRecentUserMsg = self.messages.some(function(m) {
+            return m.role === 'user' && m.ts && (Date.now() - m.ts) < 10000;
+          });
+          if (!hasRecentUserMsg) {
+            self.messages = historyMessages;
+            self.$nextTick(function() { self.scrollToBottom(); });
+          }
+        }
+      }).catch(function() { /* non-critical — history just won't show */ });
+    },
+
     handleWsMessage(data) {
       switch (data.type) {
         case 'connected': break;
@@ -634,7 +716,7 @@ function chatPage() {
         case 'thinking':
           if (!this.messages.length || !this.messages[this.messages.length - 1].thinking) {
             var thinkLabel = data.level ? 'Thinking (' + data.level + ')...' : 'Processing...';
-            this.messages.push({ id: ++msgId, role: 'agent', text: thinkLabel, meta: '', thinking: true, streaming: true, tools: [] });
+            this.messages.push({ id: ++msgId, role: 'agent', text: thinkLabel, meta: '', thinking: true, streaming: true, tools: [], _thinking: '', _thinkOpen: false });
             this.scrollToBottom();
             this._resetTypingTimeout();
           } else if (data.level) {
@@ -647,7 +729,7 @@ function chatPage() {
         case 'typing':
           if (data.state === 'start') {
             if (!this.messages.length || !this.messages[this.messages.length - 1].thinking) {
-              this.messages.push({ id: ++msgId, role: 'agent', text: 'Processing...', meta: '', thinking: true, streaming: true, tools: [] });
+              this.messages.push({ id: ++msgId, role: 'agent', text: 'Processing...', meta: '', thinking: true, streaming: true, tools: [], _thinking: '', _thinkOpen: false });
               this.scrollToBottom();
             }
             this._resetTypingTimeout();
@@ -690,13 +772,18 @@ function chatPage() {
             // If we already detected a text-based tool call, skip further text
             if (last._toolTextDetected) break;
             var newContent = extractContentText(data.content);
-            // text_replace: SET (gateway sends full cumulative text — idempotent, no duplicates)
-            // text_delta: APPEND (fallback for incremental mode)
+            // text_replace: SET full cumulative text each time (gateway idempotent)
+            // text_delta: APPEND incremental chunk
+            var rawFull;
             if (data.type === 'text_replace') {
-              last.text = newContent;
+              rawFull = newContent;
             } else {
-              last.text += newContent;
+              rawFull = (last._rawText || '') + newContent;
             }
+            last._rawText = rawFull;
+            var parsed = extractThinking(rawFull);
+            if (parsed.thinking) last._thinking = parsed.thinking;
+            last.text = parsed.text;
             // Detect function-call patterns streamed as text and convert to tool cards
             var fcIdx = last.text.search(/\w+<\/function[=,>]/);
             if (fcIdx === -1) fcIdx = last.text.search(/<function=\w+>/);
@@ -721,7 +808,7 @@ function chatPage() {
             }
             this.tokenCount = Math.round(last.text.length / 4);
           } else {
-            this.messages.push({ id: ++msgId, role: 'agent', text: extractContentText(data.content), meta: '', streaming: true, tools: [] });
+            this.messages.push({ id: ++msgId, role: 'agent', text: extractContentText(data.content), meta: '', streaming: true, tools: [], _thinking: '', _thinkOpen: false });
           }
           this.scrollToBottom();
           break;
@@ -789,13 +876,24 @@ function chatPage() {
           if (data.context_pressure) {
             this.contextPressure = data.context_pressure;
           }
-          // Collect streamed text before removing streaming messages
+          // Collect streamed text + thinking before removing streaming messages.
+          // Also check _rawText on thinking bubbles in case text_replace arrived
+          // while the bubble was still in thinking state (e.g. after tab remount).
           var streamedText = '';
+          var streamedThinking = '';
           var streamedTools = [];
           this.messages.forEach(function(m) {
-            if (m.streaming && !m.thinking && m.role === 'agent') {
-              streamedText += m.text || '';
-              streamedTools = streamedTools.concat(m.tools || []);
+            if (m.streaming && m.role === 'agent') {
+              if (!m.thinking) {
+                streamedText += m.text || '';
+                if (m._thinking) streamedThinking += m._thinking;
+                streamedTools = streamedTools.concat(m.tools || []);
+              } else if (m._rawText) {
+                // thinking bubble that received text_replace but wasn't converted yet
+                var p = extractThinking(m._rawText);
+                streamedText += p.text || '';
+                if (p.thinking) streamedThinking += p.thinking;
+              }
             }
           });
           streamedTools.forEach(function(t) {
@@ -821,7 +919,8 @@ function chatPage() {
           if (!finalText.trim() && streamedTools.length) {
             finalText = '';
           }
-          this.messages.push({ id: ++msgId, role: 'agent', text: finalText, meta: meta, tools: streamedTools, ts: Date.now() });
+          var finalMsg = { id: ++msgId, role: 'agent', text: finalText, meta: meta, tools: streamedTools, ts: Date.now(), _thinking: streamedThinking, _thinkOpen: false };
+          this.messages.push(finalMsg);
           this.sending = false;
           this.tokenCount = 0;
           this.scrollToBottom();
@@ -990,7 +1089,7 @@ function chatPage() {
       var sessionKey = this.currentAgent ? this.currentAgent.id : 'main';
 
       // Show thinking indicator
-      this.messages.push({ id: ++msgId, role: 'agent', text: '', meta: '', thinking: true, streaming: true, tools: [], ts: Date.now() });
+      this.messages.push({ id: ++msgId, role: 'agent', text: '', meta: '', thinking: true, streaming: true, tools: [], ts: Date.now(), _thinking: '', _thinkOpen: false });
       this.scrollToBottom();
 
       // Use chat.send RPC for streaming (gateway emits 'chat' events back to all clients)

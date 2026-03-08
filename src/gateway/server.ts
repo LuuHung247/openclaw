@@ -778,6 +778,69 @@ function resolveSessionTranscriptCandidates(
   return candidates;
 }
 
+/**
+ * Append a user message entry to the session JSONL file so chat.history
+ * returns it after a browser refresh. SessionManager only persists entries
+ * once an assistant message exists (hasAssistant guard), so for the very
+ * first user message in a session the user turn is never written to disk.
+ * We write it here before agentCommand runs as a fallback.
+ */
+function appendUserMessageToSessionFile(
+  sessionId: string,
+  storePath: string | undefined,
+  text: string,
+): void {
+  const candidates = resolveSessionTranscriptCandidates(sessionId, storePath);
+  const filePath = candidates.find((p) => fs.existsSync(p));
+  if (!filePath) return; // session file not created yet — SessionManager will handle it
+
+  try {
+    // Read last entry to use as parentId (leafId equivalent)
+    const lines = fs.readFileSync(filePath, "utf-8").split(/\r?\n/).filter((l) => l.trim());
+    const lastLine = lines[lines.length - 1];
+    let parentId: string | undefined;
+    try {
+      parentId = (JSON.parse(lastLine) as { id?: string }).id;
+    } catch {
+      // ignore
+    }
+    if (!parentId) return; // can't determine parentId — skip to avoid corrupting tree
+
+    // Check if a user message with the same text was already written (avoid duplicates
+    // when SessionManager successfully persisted it before we get here)
+    const alreadyPresent = lines.some((l) => {
+      try {
+        const e = JSON.parse(l) as { type?: string; message?: { role?: string; content?: unknown } };
+        if (e.type !== "message" || e.message?.role !== "user") return false;
+        const content = e.message.content;
+        if (Array.isArray(content)) {
+          return content.some((b) => (b as { type?: string; text?: string }).type === "text" && (b as { text?: string }).text === text);
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    });
+    if (alreadyPresent) return;
+
+    const id = crypto.randomUUID().slice(0, 8);
+    const entry = {
+      type: "message",
+      id,
+      parentId,
+      timestamp: new Date().toISOString(),
+      message: {
+        role: "user",
+        content: [{ type: "text", text }],
+        timestamp: Date.now(),
+      },
+    };
+    fs.appendFileSync(filePath, `${JSON.stringify(entry)}\n`);
+  } catch {
+    // non-critical — history just won't show user message
+  }
+}
+
 function archiveFileOnDisk(filePath: string, reason: string): string {
   const ts = new Date().toISOString().replaceAll(":", "-");
   const archived = `${filePath}.${reason}.${ts}`;
@@ -2731,6 +2794,11 @@ export async function startGatewayServer(
                 await saveSessionStore(storePath, store);
               }
             }
+
+            // Write user message to JSONL before running the agent so that
+            // chat.history returns it after a browser refresh (SessionManager
+            // may skip it when the session file is newly created).
+            appendUserMessageToSessionFile(sessionId, storePath, p.message);
 
             await agentCommand(
               {
