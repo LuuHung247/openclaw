@@ -44,7 +44,16 @@ export async function ensureClawdisModelsJson(
   // prevent ALL custom providers (like deepseek) from loading.
   const customProviders: typeof providers = {};
   for (const [pid, entry] of Object.entries(providers)) {
-    if (entry && Array.isArray(entry.models) && entry.models.length > 0) {
+    // Pi SDK requires apiKey for every custom provider in models.json.
+    // Providers without apiKey would cause schema validation to fail and
+    // prevent ALL custom providers from loading.
+    if (
+      entry &&
+      Array.isArray(entry.models) &&
+      entry.models.length > 0 &&
+      typeof (entry as Record<string, unknown>).apiKey === "string" &&
+      ((entry as Record<string, unknown>).apiKey as string).trim().length > 0
+    ) {
       customProviders[pid] = entry;
     }
   }

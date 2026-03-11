@@ -6,7 +6,7 @@
  * settings, and a system prompt that defines its workflow.
  */
 
-export type HandSettingType = "text" | "number" | "select" | "boolean";
+export type HandSettingType = "text" | "number" | "select" | "boolean" | "session";
 
 export interface HandSettingOption {
   value: string;

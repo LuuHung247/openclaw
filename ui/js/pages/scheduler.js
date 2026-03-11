@@ -19,6 +19,10 @@ function schedulerPage() {
     history: [],
     historyLoading: false,
 
+    // -- Sessions list for target dropdown --
+    sessions: [],
+    sessionsLoading: false,
+
     // -- Create Job form --
     showCreateForm: false,
     newJob: {
@@ -27,7 +31,7 @@ function schedulerPage() {
       cronExpr: '',
       intervalMinutes: 5,
       atTimestamp: '',
-      sessionTarget: 'isolated', // 'main' or 'isolated'
+      sessionKey: '', // session key from dropdown (populated after sessions load)
       message: '',
       enabled: true,
       description: ''
@@ -61,11 +65,26 @@ function schedulerPage() {
       this.loading = true;
       this.loadError = '';
       try {
-        await Promise.all([this.loadJobs(), this.loadSchedulerStatus()]);
+        await Promise.all([this.loadJobs(), this.loadSchedulerStatus(), this.loadSessions()]);
       } catch(e) {
         this.loadError = e.message || 'Could not load scheduler data.';
       }
       this.loading = false;
+    },
+
+    async loadSessions() {
+      this.sessionsLoading = true;
+      try {
+        var agents = await OpenFangAPI.getAgents();
+        this.sessions = agents || [];
+        // Default to first session if not yet set
+        if (!this.newJob.sessionKey && this.sessions.length > 0) {
+          this.newJob.sessionKey = this.sessions[0].id;
+        }
+      } catch(e) {
+        this.sessions = [];
+      }
+      this.sessionsLoading = false;
     },
 
     async loadSchedulerStatus() {
@@ -210,19 +229,14 @@ function schedulerPage() {
           return;
         }
 
-        // Build payload object
-        var payload;
-        if (this.newJob.sessionTarget === 'main') {
-          payload = {
-            kind: 'systemEvent',
-            text: this.newJob.message || 'Scheduled task: ' + this.newJob.name
-          };
-        } else {
-          payload = {
-            kind: 'agentTurn',
-            message: this.newJob.message || 'Scheduled task: ' + this.newJob.name
-          };
-        }
+        // sessionTarget must be "main" or "isolated" per gateway schema.
+        // Specific session is targeted via payload.sessionKey.
+        var sessionKey = this.newJob.sessionKey || 'main';
+        var payload = {
+          kind: 'agentTurn',
+          message: this.newJob.message || 'Scheduled task: ' + this.newJob.name,
+          sessionKey: sessionKey
+        };
 
         // Openclaw Gateway: cron.add accepts full CronJobCreate object
         var jobSpec = {
@@ -230,10 +244,9 @@ function schedulerPage() {
           description: this.newJob.description || undefined,
           enabled: this.newJob.enabled,
           schedule: schedule,
-          sessionTarget: this.newJob.sessionTarget,
+          sessionTarget: 'main',
           wakeMode: 'next-heartbeat',
-          payload: payload,
-          isolation: this.newJob.sessionTarget === 'isolated' ? { postToMainPrefix: 'Cron' } : undefined
+          payload: payload
         };
 
         await OpenFangAPI.createCronJob(jobSpec);
@@ -244,7 +257,7 @@ function schedulerPage() {
           cronExpr: '',
           intervalMinutes: 5,
           atTimestamp: '',
-          sessionTarget: 'isolated',
+          sessionKey: this.sessions.length > 0 ? this.sessions[0].id : '',
           message: '',
           enabled: true,
           description: ''

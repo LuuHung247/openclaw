@@ -412,7 +412,10 @@ export async function runEmbeddedPiAgent(params: {
           blockReplyBreak: params.blockReplyBreak,
           onPartialReply: params.onPartialReply,
           onAgentEvent: params.onAgentEvent,
-          enforceFinalTag: params.enforceFinalTag,
+          // Enable final-tag extraction whenever the system prompt uses the
+          // <think>/<final> format (i.e. for all non-Anthropic providers).
+          // Without this, the raw tags leak through to the user.
+          enforceFinalTag: params.enforceFinalTag ?? reasoningTagHint,
         });
 
         const abortTimer = setTimeout(

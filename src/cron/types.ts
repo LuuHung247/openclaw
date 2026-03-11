@@ -19,6 +19,7 @@ export type CronPayload =
         | "telegram";
       to?: string;
       bestEffortDeliver?: boolean;
+      sessionKey?: string; // Target specific session (webui, telegram, lark, etc.)
     };
 
 export type CronIsolation = {

@@ -367,3 +367,54 @@ export async function handleHandsUpdateSettings(
   await deps.registry.saveInstances();
   respond(true, { instance: updated }, undefined);
 }
+
+/**
+ * Get available sessions for session-type setting dropdown
+ * Returns sessions formatted as { value: sessionKey, label: "DisplayName (channel)" }
+ */
+export async function handleHandsSessionsOptions(
+  params: Record<string, unknown>,
+  deps: HandsDeps,
+  respond: RespondFn,
+): Promise<void> {
+  // Import sessions helper locally to avoid circular dependency
+  const { loadSessionStore, resolveStorePath } = await import("../../config/sessions.js");
+  const { loadConfig } = await import("../../config/config.js");
+
+  try {
+    const cfg = loadConfig();
+    const storePath = resolveStorePath(cfg.session?.store);
+    const store = loadSessionStore(storePath);
+
+    // Format sessions for dropdown: value = sessionKey, label = "DisplayName (channel)"
+    const options = Object.entries(store)
+      .filter(([key, entry]) => {
+        // Filter out global and unknown sessions
+        if (key === "global" || key === "unknown") return false;
+        // Only include active sessions (updated within 24 hours)
+        const dayMs = 24 * 60 * 60 * 1000;
+        const updatedAt = entry?.updatedAt ?? 0;
+        return Date.now() - updatedAt < dayMs;
+      })
+      .map(([key, entry]) => {
+        const displayName = entry?.displayName ?? key;
+        const lastChannel = entry?.lastChannel ?? "unknown";
+        // Format: "webui", "webui (telegram)", "lark", etc.
+        const label = lastChannel && lastChannel !== key
+          ? `${displayName} (${lastChannel})`
+          : displayName;
+        return {
+          value: key,
+          label,
+        };
+      });
+
+    respond(true, { options }, undefined);
+  } catch (err) {
+    respond(
+      false,
+      undefined,
+      errorShape(ErrorCodes.UNAVAILABLE, `Failed to load sessions: ${String(err)}`),
+    );
+  }
+}

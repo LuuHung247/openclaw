@@ -473,6 +473,7 @@ export const CronPayloadSchema = Type.Union([
       ),
       to: Type.Optional(Type.String()),
       bestEffortDeliver: Type.Optional(Type.Boolean()),
+      sessionKey: Type.Optional(Type.String()), // Target specific session (webui, telegram, lark, etc.)
     },
     { additionalProperties: false },
   ),
@@ -650,7 +651,13 @@ export const ChatEventSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const HandsSessionsOptionsParamsSchema = Type.Object(
+  {},
+  { additionalProperties: false },
+);
+
 export const ProtocolSchemas: Record<string, TSchema> = {
+  HandsSessionsOptionsParams: HandsSessionsOptionsParamsSchema,
   ConnectParams: ConnectParamsSchema,
   HelloOk: HelloOkSchema,
   RequestFrame: RequestFrameSchema,
@@ -761,6 +768,7 @@ export type ChatAbortParams = Static<typeof ChatAbortParamsSchema>;
 export type ChatEvent = Static<typeof ChatEventSchema>;
 export type TickEvent = Static<typeof TickEventSchema>;
 export type ShutdownEvent = Static<typeof ShutdownEventSchema>;
+export type HandsSessionsOptionsParams = Static<typeof HandsSessionsOptionsParamsSchema>;
 
 export const ErrorCodes = {
   NOT_LINKED: "NOT_LINKED",

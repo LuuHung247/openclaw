@@ -262,6 +262,10 @@ function settingsPage() {
             if (this.providerUrlSaving[p.id] === undefined) {
               this.providerUrlSaving[p.id] = false;
             }
+            // Init key input slot for local providers that also accept a key (e.g. litellm)
+            if (this.providerKeyInputs[p.id] === undefined) {
+              this.providerKeyInputs[p.id] = '';
+            }
           }
         }
       } catch(e) { this.providers = []; }
@@ -525,15 +529,44 @@ function settingsPage() {
       }
       this.providerUrlSaving[provider.id] = true;
       try {
-        var result = await OpenFangAPI.put('/api/providers/' + encodeURIComponent(provider.id) + '/url', { base_url: url });
+        // Pass current key input (if any) so LiteLLM can use it to fetch models
+        var keyInput = (this.providerKeyInputs[provider.id] || '').trim();
+        var result = await OpenFangAPI.put('/api/providers/' + encodeURIComponent(provider.id) + '/url', {
+          base_url: url,
+          api_key: keyInput || undefined
+        });
         if (result && result.reachable) {
-          OpenFangToast.success(provider.display_name + ' URL saved — reachable (' + (result.latency_ms || '?') + 'ms)');
+          OpenFangToast.success(provider.display_name + ' URL saved — models loaded');
         } else {
-          OpenFangToast.warn(provider.display_name + ' URL saved but not reachable');
+          OpenFangToast.warn(provider.display_name + ' URL saved (could not fetch models — check key/URL)');
         }
         await this.loadProviders();
+        await this.loadModels();
       } catch(e) {
         OpenFangToast.error('Failed to save URL: ' + e.message);
+      }
+      this.providerUrlSaving[provider.id] = false;
+    },
+
+    async refreshLiteLLMModels(provider) {
+      var url = (this.providerUrlInputs[provider.id] || provider.base_url || '').trim();
+      var key = (this.providerKeyInputs[provider.id] || '').trim();
+      if (!url) { OpenFangToast.error('Enter Base URL first'); return; }
+      this.providerUrlSaving[provider.id] = true;
+      try {
+        var result = await OpenFangAPI.put('/api/providers/' + encodeURIComponent(provider.id) + '/url', {
+          base_url: url,
+          api_key: key || undefined
+        });
+        if (result && result.reachable) {
+          OpenFangToast.success('Models refreshed from LiteLLM');
+        } else {
+          OpenFangToast.warn('Could not fetch models — check URL and key');
+        }
+        await this.loadProviders();
+        await this.loadModels();
+      } catch(e) {
+        OpenFangToast.error('Refresh failed: ' + e.message);
       }
       this.providerUrlSaving[provider.id] = false;
     },

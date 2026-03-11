@@ -20,6 +20,7 @@ import {
   type ModelCatalogEntry,
   resetModelCatalogCacheForTest,
 } from "../agents/model-catalog.js";
+import { ensureClawdisModelsJson } from "../agents/models-config.js";
 import { resolveConfiguredModelRef } from "../agents/model-selection.js";
 import { installSkill } from "../agents/skills-install.js";
 import { buildWorkspaceSkillStatus } from "../agents/skills-status.js";
@@ -1766,12 +1767,17 @@ export async function startGatewayServer(
     requestHeartbeatNow,
     runIsolatedAgentJob: async ({ job, message }) => {
       const cfg = loadConfig();
+      // Use sessionKey from payload if specified, otherwise default to cron job scoped key
+      const sessionKey =
+        (job.payload.kind === "agentTurn" && job.payload.sessionKey?.trim())
+          ? job.payload.sessionKey.trim()
+          : `cron:${job.id}`;
       return await runCronIsolatedAgentTurn({
         cfg,
         deps,
         job,
         message,
-        sessionKey: `cron:${job.id}`,
+        sessionKey,
         lane: "cron",
       });
     },
@@ -2228,6 +2234,13 @@ export async function startGatewayServer(
             };
           }
           await writeConfigFile(validated.config);
+          // Sync models.json immediately so Pi SDK picks up new providers without
+          // requiring a gateway restart or waiting for the first agent run.
+          ensureClawdisModelsJson(validated.config).catch((err) => {
+            logProviders.warn(`models.json sync after config.set failed: ${formatError(err)}`);
+          });
+          // Bust model catalog cache so next models.list reflects new providers.
+          resetModelCatalogCacheForTest();
           await stopTelegramProvider();
           startTelegramProvider().catch((err) => {
             logTelegram.error(`config update telegram spawn failed: ${formatError(err)}`);
@@ -4459,6 +4472,10 @@ export async function startGatewayServer(
                 break;
               }
               await writeConfigFile(validated.config);
+              ensureClawdisModelsJson(validated.config).catch((err) => {
+                logProviders.warn(`models.json sync after config.set failed: ${formatError(err)}`);
+              });
+              resetModelCatalogCacheForTest();
               await stopTelegramProvider();
               startTelegramProvider().catch((err) => {
                 logTelegram.error(`config update telegram spawn failed: ${formatError(err)}`);

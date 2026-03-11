@@ -705,6 +705,7 @@ var OpenFangAPI = (function() {
     { id: 'vllm',       display_name: 'vLLM',           env: 'VLLM_API_KEY',        key_url: '',                                            no_key_needed: true  },
     { id: 'lmstudio',  display_name: 'LM Studio',      env: 'LMSTUDIO_API_KEY',    key_url: '',                                            no_key_needed: true  },
     { id: 'zai',        display_name: 'Z.AI / GLM',     env: 'ZAI_API_KEY',         key_url: 'https://bigmodel.cn/usercenter/apikeys',      no_key_needed: false },
+    { id: 'litellm',   display_name: 'LiteLLM Proxy',  env: 'LITELLM_API_KEY',     key_url: '',                                            no_key_needed: false, is_local: true },
   ];
 
   // providers — LLM providers built from models.list + config
@@ -732,12 +733,11 @@ var OpenFangAPI = (function() {
         var count = modelCountByProvider[def.id] || 0;
         var cfgEntry = cfgProviders[def.id] || {};
         var hasKey = !!(cfgEntry.apiKey && cfgEntry.apiKey.trim());
-        // OpenClaw Gateway returns all supported models by default via PI SDK,
-        // so we CANNOT rely on `count > 0` to determine if a provider is configured.
-        // We must rely strictly on whether a key is saved in the config.
-        // (Note: env vars are not visible to this UI logic unless they unlock models
-        // in a way that openfang did, but in openclaw we just trust the config file).
-        var isConfigured = def.no_key_needed || hasKey;
+        var hasBaseUrl = !!(cfgEntry.baseUrl && cfgEntry.baseUrl.trim());
+        var isLocal = def.is_local || def.no_key_needed;
+        // Local providers (litellm, ollama, etc.): configured when baseUrl is set
+        // Remote providers: configured when apiKey is set
+        var isConfigured = def.no_key_needed || hasKey || (isLocal && hasBaseUrl);
         return {
           id: def.id,
           display_name: def.display_name,
@@ -748,7 +748,7 @@ var OpenFangAPI = (function() {
           auth_status: def.no_key_needed ? 'no_key_needed' : (isConfigured ? 'configured' : 'not_set'),
           base_url: cfgEntry.baseUrl || '',
           health: 'unknown',
-          is_local: def.no_key_needed
+          is_local: isLocal
         };
       });
 
@@ -784,6 +784,7 @@ var OpenFangAPI = (function() {
       Object.keys(cfgProviders).forEach(function(provId) {
         var entry = cfgProviders[provId] || {};
         var hasKey = !!(entry.apiKey && entry.apiKey.trim());
+        var hasBaseUrl = !!(entry.baseUrl && entry.baseUrl.trim());
         var modelDefs = entry.models || [];
         modelDefs.forEach(function(m) {
           var modelId = m.id || '';
@@ -802,7 +803,7 @@ var OpenFangAPI = (function() {
             output_cost: m.cost ? m.cost.output : null,
             input_cost_per_m: m.cost ? m.cost.input : null,
             output_cost_per_m: m.cost ? m.cost.output : null,
-            available: hasKey || noKeyNeeded[provId] || false
+            available: hasKey || hasBaseUrl || noKeyNeeded[provId] || false
           });
         });
       });
@@ -1484,9 +1485,26 @@ var OpenFangAPI = (function() {
             { id: 'glm-4.7-flash',name: 'GLM-4.7 Flash', reasoning: true, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 204800, maxTokens: 131072 }
           ]
         },
+        litellm: {
+          baseUrl: 'http://192.168.1.68:4000',
+          api: 'openai-completions',
+          models: []
+        },
       };
 
       var preset = PROVIDER_PRESETS[provId];
+      // For local providers (litellm): read current config to preserve existing baseUrl + models
+      if (provId === 'litellm') {
+        return request('config.get', {}).then(function(p) {
+          var cfg = (p && p.config) || p || {};
+          var existing = (cfg.models && cfg.models.providers && cfg.models.providers.litellm) || {};
+          var mergedEntry = Object.assign({ api: 'openai-completions', models: [] }, existing, { apiKey: body.key });
+          if (!mergedEntry.baseUrl && preset) mergedEntry.baseUrl = preset.baseUrl;
+          var kp = { models: { providers: { litellm: mergedEntry } } };
+          return configPatch(kp);
+        });
+      }
+
       var provEntry = preset
         ? Object.assign({}, preset, { apiKey: body.key })
         : { apiKey: body.key };
@@ -1649,8 +1667,54 @@ var OpenFangAPI = (function() {
     // provider URL
     if (path.startsWith('/api/providers/') && path.endsWith('/url')) {
       var provId = path.split('/')[3];
-      var urlPatch = { providers: {} };
-      urlPatch.providers[provId] = { baseUrl: body.base_url };
+      var baseUrl = (body.base_url || '').replace(/\/$/, '');
+      var urlPatch = { models: { providers: {} } };
+      urlPatch.models.providers[provId] = { baseUrl: baseUrl };
+
+      // For LiteLLM: fetch available models from the proxy and save them too
+      if (provId === 'litellm' && baseUrl) {
+        // Try key from body first, then fall back to what's already in config
+        var fetchKey = body.api_key || '';
+        var keyPromise = fetchKey
+          ? Promise.resolve(fetchKey)
+          : request('config.get', {}).then(function(p) {
+              var cfg = (p && p.config) || p || {};
+              return ((cfg.models && cfg.models.providers && cfg.models.providers.litellm) || {}).apiKey || '';
+            }).catch(function() { return ''; });
+
+        return keyPromise.then(function(apiKey) {
+          return fetch(baseUrl + '/models', {
+            headers: apiKey ? { 'Authorization': 'Bearer ' + apiKey } : {}
+          });
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          var litellmModels = ((data && data.data) || []).map(function(m) {
+            return {
+              id: m.id,
+              name: m.id,
+              reasoning: false,
+              input: ['text', 'image'],
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 128000,
+              maxTokens: 8192
+            };
+          });
+          var entry = { baseUrl: baseUrl, api: 'openai-completions', models: litellmModels };
+          if (body.api_key) entry.apiKey = body.api_key;
+          urlPatch.models.providers[provId] = entry;
+          return configPatch(urlPatch).then(function() {
+            return { reachable: true, latency_ms: 0 };
+          });
+        }).catch(function() {
+          // Save URL + key anyway even if model fetch failed
+          var entry = { baseUrl: baseUrl, api: 'openai-completions' };
+          if (body.api_key) entry.apiKey = body.api_key;
+          urlPatch.models.providers[provId] = entry;
+          return configPatch(urlPatch).then(function() {
+            return { reachable: false, latency_ms: 0 };
+          });
+        });
+      }
+
       return configPatch(urlPatch);
     }
 

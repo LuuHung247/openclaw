@@ -105,6 +105,8 @@ import {
   WebLoginStartParamsSchema,
   type WebLoginWaitParams,
   WebLoginWaitParamsSchema,
+  type HandsSessionsOptionsParams,
+  HandsSessionsOptionsParamsSchema,
 } from "./schema.js";
 
 const ajv = new (
@@ -217,6 +219,8 @@ export const validateWebLoginStartParams = ajv.compile<WebLoginStartParams>(
 export const validateWebLoginWaitParams = ajv.compile<WebLoginWaitParams>(
   WebLoginWaitParamsSchema,
 );
+export const validateHandsSessionsOptionsParams =
+  ajv.compile<HandsSessionsOptionsParams>(HandsSessionsOptionsParamsSchema);
 
 export function formatValidationErrors(
   errors: ErrorObject[] | null | undefined,
@@ -258,6 +262,7 @@ export {
   ProvidersStatusParamsSchema,
   WebLoginStartParamsSchema,
   WebLoginWaitParamsSchema,
+  HandsSessionsOptionsParamsSchema,
   ModelsListParamsSchema,
   SkillsStatusParamsSchema,
   SkillsInstallParamsSchema,
@@ -305,6 +310,7 @@ export type {
   ProvidersStatusParams,
   WebLoginStartParams,
   WebLoginWaitParams,
+  HandsSessionsOptionsParams,
   SkillsStatusParams,
   SkillsInstallParams,
   SkillsUpdateParams,

@@ -2371,14 +2371,13 @@
 
                     <div class="form-group">
                       <label>Session Target</label>
-                      <select class="form-select" x-model="newJob.sessionTarget">
-                        <option value="isolated">Isolated Agent (recommended)</option>
-                        <option value="main">Main Agent Session</option>
+                      <select class="form-select" x-model="newJob.sessionKey">
+                        <option value="" disabled x-show="sessions.length === 0">Loading sessions...</option>
+                        <template x-for="sess in sessions" :key="sess.id">
+                          <option :value="sess.id" x-text="sess.name + ' (' + sess.id + ')'"></option>
+                        </template>
                       </select>
-                      <div class="text-xs text-dim mt-1">
-                        <span x-show="newJob.sessionTarget === 'isolated'">Runs in a separate isolated session with fresh context.</span>
-                        <span x-show="newJob.sessionTarget === 'main'">Sends a system event to the main session.</span>
-                      </div>
+                      <div class="text-xs text-dim mt-1">Sends message to the selected session.</div>
                     </div>
 
                     <div class="form-group">
@@ -3323,14 +3322,14 @@
                       </div>
                       <div class="card-meta" x-text="(p.model_count || 0) + ' model(s) available'"></div>
                       <div class="text-xs text-dim mt-2" x-show="p.env_var" x-text="'Env: ' + p.env_var"></div>
-                      <!-- Key input for unconfigured providers -->
-                      <template x-if="p.auth_status !== 'configured' && p.env_var">
+                      <!-- Key input for unconfigured providers (not litellm — it has its own combined form) -->
+                      <template x-if="p.auth_status !== 'configured' && p.env_var && p.id !== 'litellm'">
                         <div class="key-input-group">
                           <input type="password" :placeholder="'Enter ' + p.env_var" x-model="providerKeyInputs[p.id]">
                           <button class="btn btn-primary btn-sm" @click="saveProviderKey(p)">Save</button>
                         </div>
                       </template>
-                      <template x-if="p.auth_status !== 'configured' && p.env_var">
+                      <template x-if="p.auth_status !== 'configured' && p.env_var && p.id !== 'litellm'">
                         <div class="text-xs text-dim mt-2">Or set <code
                             style="color:var(--accent-light);background:var(--bg);padding:1px 4px;border-radius:2px"
                             x-text="p.env_var"></code> in your environment and restart</div>
@@ -3378,8 +3377,29 @@
                           x-show="p.auth_status !== 'configured' && p.auth_status !== 'not_set' && p.auth_status !== 'missing'">
                           No API key needed &mdash; runs locally or is free</div>
                       </template>
-                      <!-- Base URL editor for local providers -->
-                      <template x-if="p.is_local">
+                      <!-- LiteLLM: combined URL + Key + Fetch Models -->
+                      <template x-if="p.id === 'litellm'">
+                        <div class="mt-3" style="border-top:1px solid var(--border);padding-top:8px">
+                          <div class="text-xs text-dim mb-1">Proxy URL</div>
+                          <div class="key-input-group mb-2">
+                            <input type="text" placeholder="http://192.168.x.x:4000" x-model="providerUrlInputs[p.id]"
+                              style="font-size:12px">
+                          </div>
+                          <div class="text-xs text-dim mb-1">Master Key <span style="opacity:0.6">(optional)</span></div>
+                          <div class="key-input-group mb-2">
+                            <input type="password" placeholder="sk-..." x-model="providerKeyInputs[p.id]"
+                              style="font-size:12px">
+                          </div>
+                          <button class="btn btn-primary btn-sm" @click="refreshLiteLLMModels(p)"
+                            :disabled="providerUrlSaving[p.id]" style="width:100%">
+                            <span x-show="!providerUrlSaving[p.id]">Save &amp; Fetch Models from LiteLLM</span>
+                            <span x-show="providerUrlSaving[p.id]" class="spinner"
+                              style="width:10px;height:10px;border-width:2px"></span>
+                          </button>
+                        </div>
+                      </template>
+                      <!-- Base URL editor for other local providers (not litellm) -->
+                      <template x-if="p.is_local && p.id !== 'litellm'">
                         <div class="mt-3" style="border-top:1px solid var(--border);padding-top:8px">
                           <div class="text-xs text-dim mb-1">Base URL</div>
                           <div class="key-input-group">
