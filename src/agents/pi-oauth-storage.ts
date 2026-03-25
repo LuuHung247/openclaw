@@ -78,9 +78,7 @@ function legacyOAuthPaths(): string[] {
   paths.push(path.join(os.homedir(), ".pi", "agent", OAUTH_FILENAME));
   paths.push(path.join(os.homedir(), ".claude", OAUTH_FILENAME));
   paths.push(path.join(os.homedir(), ".config", "claude", OAUTH_FILENAME));
-  paths.push(
-    path.join(os.homedir(), ".config", "anthropic", OAUTH_FILENAME),
-  );
+  paths.push(path.join(os.homedir(), ".config", "anthropic", OAUTH_FILENAME));
   return Array.from(new Set(paths));
 }
 

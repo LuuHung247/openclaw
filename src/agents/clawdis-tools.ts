@@ -45,7 +45,7 @@ import { callGateway } from "../gateway/call.js";
 import { GATEWAY_DEFAULT_WS_URL } from "../gateway/constants.js";
 import { detectMime, imageMimeFromFormat } from "../media/mime.js";
 import { sanitizeToolResultImages } from "./tool-images.js";
-import { readStringParam, readStringArrayParam } from "./tool-params.js";
+import { readStringParam } from "./tool-params.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: TypeBox schema type from pi-agent-core uses a different module instance.
 type AnyAgentTool = AgentTool<any, unknown>;
@@ -71,7 +71,6 @@ function resolveGatewayOptions(opts?: GatewayCallOptions) {
       : 10_000;
   return { url, token, timeoutMs };
 }
-
 
 async function callGatewayTool<T = unknown>(
   method: string,

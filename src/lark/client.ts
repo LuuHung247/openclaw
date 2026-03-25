@@ -11,7 +11,8 @@ import type {
   LarkTokenResponse,
 } from "./types.js";
 
-const LARK_TOKEN_URL = "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal";
+const LARK_TOKEN_URL =
+  "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal";
 const LARK_SEND_URL = "https://open.larksuite.com/open-apis/im/v1/messages";
 const TOKEN_REFRESH_BUFFER_SEC = 300; // Refresh 5min before expiry
 
@@ -56,7 +57,8 @@ export class LarkClient {
     }
 
     const expireSec = data.expire ?? 7200;
-    const expiresAt = Date.now() + (expireSec - TOKEN_REFRESH_BUFFER_SEC) * 1000;
+    const expiresAt =
+      Date.now() + (expireSec - TOKEN_REFRESH_BUFFER_SEC) * 1000;
 
     this.cachedToken = {
       token: data.tenant_access_token,
@@ -78,7 +80,7 @@ export class LarkClient {
     text: string,
     replyTo?: string,
   ): Promise<string> {
-    const token = await this.getAccessToken();
+    const _token = await this.getAccessToken();
 
     // Detect receive_id type from format
     // Lark user_id: ou_xxxxx, chat_id: oc_xxxxx
@@ -123,7 +125,8 @@ export class LarkClient {
       throw new Error(`Lark send failed ${response.status}: ${text}`);
     }
 
-    const data: LarkSendMessageResponse | LarkErrorResponse = await response.json();
+    const data: LarkSendMessageResponse | LarkErrorResponse =
+      await response.json();
 
     if (data.code !== 0) {
       throw new Error(`Lark send error: ${data.msg}`);

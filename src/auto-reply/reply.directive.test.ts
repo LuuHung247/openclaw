@@ -591,8 +591,7 @@ describe("directive parsing", () => {
       expect(text).toContain("Model set to openai/gpt-4.1-mini");
       const store = loadSessionStore(storePath);
       const entry = store.main;
-      expect(entry.modelOverride).toBe("gpt-4.1-mini");
-      expect(entry.providerOverride).toBe("openai");
+      expect(entry.model).toBe("openai/gpt-4.1-mini");
       expect(runEmbeddedPiAgent).not.toHaveBeenCalled();
     });
   });
@@ -623,8 +622,7 @@ describe("directive parsing", () => {
       expect(text).toContain("anthropic/claude-opus-4-5");
       const store = loadSessionStore(storePath);
       const entry = store.main;
-      expect(entry.modelOverride).toBe("claude-opus-4-5");
-      expect(entry.providerOverride).toBe("anthropic");
+      expect(entry.model).toBe("anthropic/claude-opus-4-5");
       expect(runEmbeddedPiAgent).not.toHaveBeenCalled();
     });
   });

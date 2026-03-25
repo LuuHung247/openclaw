@@ -7,14 +7,17 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-
+import { getMcpManager, resetMcpManager } from "../../agents/mcp-manager.js";
 import type { ClawdisConfig, McpServerConfig } from "../../config/config.js";
 import { writeConfigFile } from "../../config/config.js";
-import { getMcpManager, resetMcpManager } from "../../agents/mcp-manager.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
+function jsonResponse(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+): void {
   const payload = JSON.stringify(body);
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -25,10 +28,15 @@ function jsonResponse(res: ServerResponse, status: number, body: unknown): void 
 async function readBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let data = "";
-    req.on("data", (chunk: Buffer) => { data += chunk.toString(); });
+    req.on("data", (chunk: Buffer) => {
+      data += chunk.toString();
+    });
     req.on("end", () => {
-      try { resolve(JSON.parse(data)); }
-      catch { reject(new Error("Invalid JSON body")); }
+      try {
+        resolve(JSON.parse(data));
+      } catch {
+        reject(new Error("Invalid JSON body"));
+      }
     });
     req.on("error", reject);
   });
@@ -52,7 +60,11 @@ export function handleMcpList(
   // configured = all servers with their config merged in (for the UI to show transport info)
   const configuredWithStatus = configured.map((cfg) => {
     const status = statuses.find((s) => s.name === cfg.name);
-    return { ...cfg, connected: status?.connected ?? false, error: status?.error };
+    return {
+      ...cfg,
+      connected: status?.connected ?? false,
+      error: status?.error,
+    };
   });
 
   jsonResponse(res, 200, {
@@ -92,23 +104,41 @@ export async function handleMcpAdd(
     jsonResponse(res, 400, { ok: false, error: "transport is required" });
     return;
   }
-  const transport = entry.transport as { type?: string; command?: string; url?: string };
+  const transport = entry.transport as {
+    type?: string;
+    command?: string;
+    url?: string;
+  };
   if (transport.type !== "stdio" && transport.type !== "sse") {
-    jsonResponse(res, 400, { ok: false, error: "transport.type must be 'stdio' or 'sse'" });
+    jsonResponse(res, 400, {
+      ok: false,
+      error: "transport.type must be 'stdio' or 'sse'",
+    });
     return;
   }
   if (transport.type === "stdio" && !transport.command) {
-    jsonResponse(res, 400, { ok: false, error: "transport.command is required for stdio" });
+    jsonResponse(res, 400, {
+      ok: false,
+      error: "transport.command is required for stdio",
+    });
     return;
   }
   if (transport.type === "sse" && !transport.url) {
-    jsonResponse(res, 400, { ok: false, error: "transport.url is required for sse" });
+    jsonResponse(res, 400, {
+      ok: false,
+      error: "transport.url is required for sse",
+    });
     return;
   }
 
-  const existing = (config.mcp_servers ?? []).find((s) => s.name === entry.name);
+  const existing = (config.mcp_servers ?? []).find(
+    (s) => s.name === entry.name,
+  );
   if (existing) {
-    jsonResponse(res, 409, { ok: false, error: `Server "${entry.name}" already configured` });
+    jsonResponse(res, 409, {
+      ok: false,
+      error: `Server "${entry.name}" already configured`,
+    });
     return;
   }
 
@@ -116,7 +146,8 @@ export async function handleMcpAdd(
     name: entry.name,
     transport: entry.transport as McpServerConfig["transport"],
     env: Array.isArray(entry.env) ? entry.env : undefined,
-    timeout_secs: typeof entry.timeout_secs === "number" ? entry.timeout_secs : undefined,
+    timeout_secs:
+      typeof entry.timeout_secs === "number" ? entry.timeout_secs : undefined,
   };
 
   const updated: ClawdisConfig = {
@@ -127,7 +158,10 @@ export async function handleMcpAdd(
   try {
     await writeConfigFile(updated);
   } catch (err) {
-    jsonResponse(res, 500, { ok: false, error: `Failed to save config: ${formatError(err)}` });
+    jsonResponse(res, 500, {
+      ok: false,
+      error: `Failed to save config: ${formatError(err)}`,
+    });
     return;
   }
 
@@ -158,7 +192,10 @@ export async function handleMcpRemove(
   try {
     await writeConfigFile(updated);
   } catch (err) {
-    jsonResponse(res, 500, { ok: false, error: `Failed to save config: ${formatError(err)}` });
+    jsonResponse(res, 500, {
+      ok: false,
+      error: `Failed to save config: ${formatError(err)}`,
+    });
     return;
   }
 

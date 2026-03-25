@@ -186,8 +186,8 @@ function normalizeToolParameters(tool: AnyAgentTool): AnyAgentTool {
       ? baseRequired
       : objectVariants > 0
         ? Array.from(requiredCounts.entries())
-          .filter(([, count]) => count === objectVariants)
-          .map(([key]) => key)
+            .filter(([, count]) => count === objectVariants)
+            .map(([key]) => key)
         : undefined;
 
   return {
@@ -252,9 +252,10 @@ export function createClawdisCodingTools(options?: {
   const disabled = new Set(
     (options?.disabledTools ?? []).map((t) => t.toLowerCase()),
   );
-  const clawdisTools = disabled.size > 0
-    ? createClawdisTools().filter((t) => !disabled.has(t.name))
-    : createClawdisTools();
+  const clawdisTools =
+    disabled.size > 0
+      ? createClawdisTools().filter((t) => !disabled.has(t.name))
+      : createClawdisTools();
 
   const mcpTools = getMcpManager().buildAgentTools();
 

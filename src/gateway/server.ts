@@ -15,16 +15,14 @@ import {
   DEFAULT_MODEL,
   DEFAULT_PROVIDER,
 } from "../agents/defaults.js";
+import { getMcpManager, resetMcpManager } from "../agents/mcp-manager.js";
 import {
   loadModelCatalog,
   type ModelCatalogEntry,
   resetModelCatalogCacheForTest,
 } from "../agents/model-catalog.js";
-import { ensureClawdisModelsJson } from "../agents/models-config.js";
 import { resolveConfiguredModelRef } from "../agents/model-selection.js";
-import { installSkill } from "../agents/skills-install.js";
-import { buildWorkspaceSkillStatus } from "../agents/skills-status.js";
-import { DEFAULT_AGENT_WORKSPACE_DIR } from "../agents/workspace.js";
+import { ensureClawdisModelsJson } from "../agents/models-config.js";
 import { normalizeGroupActivation } from "../auto-reply/group-activation.js";
 import {
   normalizeThinkLevel,
@@ -54,14 +52,10 @@ import {
   saveSessionStore,
 } from "../config/sessions.js";
 import { runCronIsolatedAgentTurn } from "../cron/isolated-agent.js";
-import {
-  appendCronRunLog,
-  readCronRunLogEntries,
-  resolveCronRunLogPath,
-} from "../cron/run-log.js";
+import { appendCronRunLog, resolveCronRunLogPath } from "../cron/run-log.js";
 import { CronService } from "../cron/service.js";
 import { resolveCronStorePath } from "../cron/store.js";
-import type { CronJob, CronJobCreate, CronJobPatch } from "../cron/types.js";
+import type { CronJob } from "../cron/types.js";
 import { isVerbose } from "../globals.js";
 import { startGmailWatcher, stopGmailWatcher } from "../hooks/gmail-watcher.js";
 import {
@@ -123,6 +117,10 @@ import {
 } from "../infra/widearea-dns.js";
 import { rawDataToString } from "../infra/ws.js";
 import {
+  startLarkProvider,
+  stopLarkProvider,
+} from "../lark/lark-provider-runner.js";
+import {
   createSubsystemLogger,
   getChildLogger,
   getResolvedLoggerSettings,
@@ -131,30 +129,27 @@ import {
 import { setCommandLaneConcurrency } from "../process/command-queue.js";
 import { runExec } from "../process/exec.js";
 import { defaultRuntime } from "../runtime.js";
-import { startLarkProvider, stopLarkProvider } from "../lark/lark-provider-runner.js";
 import { monitorTelegramProvider } from "../telegram/monitor.js";
 import { probeTelegram, type TelegramProbe } from "../telegram/probe.js";
 import { sendMessageTelegram } from "../telegram/send.js";
 import { resolveTelegramToken } from "../telegram/token.js";
-import { CONFIG_DIR, resolveUserPath } from "../utils.js";
 import {
   assertGatewayAuthConfigured,
   authorizeGatewayConnect,
   type ResolvedGatewayAuth,
 } from "./auth.js";
 import { buildMessageWithAttachments } from "./chat-attachments.js";
+import { GATEWAY_DEFAULT_PORT } from "./constants.js";
+import {
+  handleMcpAdd,
+  handleMcpList,
+  handleMcpRemove,
+} from "./handlers/mcp-handlers.js";
 import {
   applyHookMappings,
   type HookMappingResolved,
   resolveHookMappings,
 } from "./hooks-mapping.js";
-import { GATEWAY_DEFAULT_PORT } from "./constants.js";
-import {
-  handleMcpList,
-  handleMcpAdd,
-  handleMcpRemove,
-} from "./handlers/mcp-handlers.js";
-import { getMcpManager, resetMcpManager } from "../agents/mcp-manager.js";
 
 ensureClawdisCliOnPath();
 
@@ -337,6 +332,29 @@ async function loadGatewayModelCatalog(): Promise<GatewayModelChoice[]> {
   return await loadModelCatalog({ config: loadConfig() });
 }
 
+import { type Client, GatewayContext } from "./gateway-context.js";
+import {
+  handleCronAdd,
+  handleCronList,
+  handleCronRemove,
+  handleCronRun,
+  handleCronRuns,
+  handleCronStatus,
+  handleCronUpdate,
+} from "./handlers/cron-handlers.js";
+import {
+  handleSkillsClawHubInstall,
+  handleSkillsInstall,
+  handleSkillsStatus,
+  handleSkillsUninstall,
+  handleSkillsUpdate,
+} from "./handlers/skills-handlers.js";
+import {
+  handleUsageByAgent,
+  handleUsageByModel,
+  handleUsageDaily,
+  handleUsageSummary,
+} from "./handlers/usage-handlers.js";
 import {
   type ConnectParams,
   ErrorCodes,
@@ -358,13 +376,6 @@ import {
   validateConfigGetParams,
   validateConfigSetParams,
   validateConnectParams,
-  validateCronAddParams,
-  validateCronListParams,
-  validateCronRemoveParams,
-  validateCronRunParams,
-  validateCronRunsParams,
-  validateCronStatusParams,
-  validateCronUpdateParams,
   validateModelsListParams,
   validateNodeDescribeParams,
   validateNodeInvokeParams,
@@ -383,60 +394,16 @@ import {
   validateSessionsListParams,
   validateSessionsPatchParams,
   validateSessionsResetParams,
-  validateSkillsInstallParams,
-  validateSkillsStatusParams,
-  validateSkillsUpdateParams,
   validateTalkModeParams,
   validateWakeParams,
-  validateWebLoginStartParams,
-  validateWebLoginWaitParams,
 } from "./protocol/index.js";
+import { appendUsageEvent } from "./usage-log.js";
 import {
-  DEFAULT_WS_SLOW_MS,
-  getGatewayWsLogStyle,
-  logWsWithMaps,
   formatForLog,
+  logWsWithMaps,
   shortId,
   type WsLogInflightMaps,
 } from "./ws-logging.js";
-import {
-  handleCronList,
-  handleCronStatus,
-  handleCronAdd,
-  handleCronUpdate,
-  handleCronRemove,
-  handleCronRun,
-  handleCronRuns,
-} from "./handlers/cron-handlers.js";
-import {
-  handleSkillsStatus,
-  handleSkillsInstall,
-  handleSkillsUpdate,
-  handleSkillsUninstall,
-  handleSkillsClawHubInstall,
-} from "./handlers/skills-handlers.js";
-import {
-  handleUsageSummary,
-  handleUsageByModel,
-  handleUsageByAgent,
-  handleUsageDaily,
-} from "./handlers/usage-handlers.js";
-import {
-  USAGE_LOG_PATH,
-  type UsageLogEntry,
-  appendUsageEvent,
-  readUsageLog,
-} from "./usage-log.js";
-import {
-  GatewayContext,
-  type Client,
-  type DedupeEntry,
-  type WsInflightEntry,
-  type ChatAbortEntry,
-  type ChatRunEntry,
-  type AuditEntry,
-  type TelegramRuntime,
-} from "./gateway-context.js";
 
 // Re-export Client so external callers (tests, etc.) don't break.
 export type { Client };
@@ -801,12 +768,32 @@ function appendUserMessageToSessionFile(
   text: string,
 ): void {
   const candidates = resolveSessionTranscriptCandidates(sessionId, storePath);
-  const filePath = candidates.find((p) => fs.existsSync(p));
-  if (!filePath) return; // session file not created yet — SessionManager will handle it
+  let filePath = candidates.find((p) => fs.existsSync(p));
+
+  // Session file chưa tồn tại → tạo mới với session header
+  if (!filePath) {
+    filePath = candidates[0];
+    if (!filePath) return;
+    try {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const header = {
+        type: "session",
+        version: 2,
+        id: sessionId,
+        timestamp: new Date().toISOString(),
+      };
+      fs.writeFileSync(filePath, `${JSON.stringify(header)}\n`, "utf-8");
+    } catch {
+      return; // non-critical — agent runner sẽ tạo file sau
+    }
+  }
 
   try {
     // Read last entry to use as parentId (leafId equivalent)
-    const lines = fs.readFileSync(filePath, "utf-8").split(/\r?\n/).filter((l) => l.trim());
+    const lines = fs
+      .readFileSync(filePath, "utf-8")
+      .split(/\r?\n/)
+      .filter((l) => l.trim());
     const lastLine = lines[lines.length - 1];
     let parentId: string | undefined;
     try {
@@ -820,11 +807,18 @@ function appendUserMessageToSessionFile(
     // when SessionManager successfully persisted it before we get here)
     const alreadyPresent = lines.some((l) => {
       try {
-        const e = JSON.parse(l) as { type?: string; message?: { role?: string; content?: unknown } };
+        const e = JSON.parse(l) as {
+          type?: string;
+          message?: { role?: string; content?: unknown };
+        };
         if (e.type !== "message" || e.message?.role !== "user") return false;
         const content = e.message.content;
         if (Array.isArray(content)) {
-          return content.some((b) => (b as { type?: string; text?: string }).type === "text" && (b as { text?: string }).text === text);
+          return content.some(
+            (b) =>
+              (b as { type?: string; text?: string }).type === "text" &&
+              (b as { text?: string }).text === text,
+          );
         }
         return false;
       } catch {
@@ -957,7 +951,7 @@ function listSessionsFromStore(params: {
   const includeUnknown = opts.includeUnknown === true;
   const activeMinutes =
     typeof opts.activeMinutes === "number" &&
-      Number.isFinite(opts.activeMinutes)
+    Number.isFinite(opts.activeMinutes)
       ? Math.max(1, Math.floor(opts.activeMinutes))
       : undefined;
 
@@ -982,14 +976,23 @@ function listSessionsFromStore(params: {
         entry?.displayName ??
         (surface
           ? buildGroupDisplayName({
-            surface,
-            subject,
-            room,
-            space,
-            id,
-            key,
-          })
+              surface,
+              subject,
+              room,
+              space,
+              id,
+              key,
+            })
           : undefined);
+      // Effective model: model field > legacy override > undefined (config default)
+      const effectiveModel = (() => {
+        if (entry?.model) return entry.model;
+        if (entry?.providerOverride && entry?.modelOverride)
+          return `${entry.providerOverride}/${entry.modelOverride}`;
+        if (entry?.modelOverride) return entry.modelOverride;
+        return undefined;
+      })();
+
       return {
         key,
         kind: classifySessionKey(key, entry),
@@ -1007,7 +1010,7 @@ function listSessionsFromStore(params: {
         inputTokens: entry?.inputTokens,
         outputTokens: entry?.outputTokens,
         totalTokens: total,
-        model: entry?.model,
+        model: effectiveModel,
         contextTokens: entry?.contextTokens,
       } satisfies GatewaySessionRow;
     })
@@ -1199,21 +1202,19 @@ export async function startGatewayServer(
     payload: Record<string, unknown>,
   ):
     | {
-      ok: true;
-      value: {
-        message: string;
-        name: string;
-        wakeMode: "now" | "next-heartbeat";
-        sessionKey: string;
-        deliver: boolean;
-        channel:
-        | "last"
-        | "telegram";
-        to?: string;
-        thinking?: string;
-        timeoutSeconds?: number;
-      };
-    }
+        ok: true;
+        value: {
+          message: string;
+          name: string;
+          wakeMode: "now" | "next-heartbeat";
+          sessionKey: string;
+          deliver: boolean;
+          channel: "last" | "telegram";
+          to?: string;
+          thinking?: string;
+          timeoutSeconds?: number;
+        };
+      }
     | { ok: false; error: string } => {
     const message =
       typeof payload.message === "string" ? payload.message.trim() : "";
@@ -1230,8 +1231,7 @@ export async function startGatewayServer(
         : `hook:${randomUUID()}`;
     const channelRaw = payload.channel;
     const channel =
-      channelRaw === "telegram" ||
-        channelRaw === "last"
+      channelRaw === "telegram" || channelRaw === "last"
         ? channelRaw
         : channelRaw === undefined
           ? "last"
@@ -1254,8 +1254,8 @@ export async function startGatewayServer(
     const timeoutRaw = payload.timeoutSeconds;
     const timeoutSeconds =
       typeof timeoutRaw === "number" &&
-        Number.isFinite(timeoutRaw) &&
-        timeoutRaw > 0
+      Number.isFinite(timeoutRaw) &&
+      timeoutRaw > 0
         ? Math.floor(timeoutRaw)
         : undefined;
     return {
@@ -1290,9 +1290,7 @@ export async function startGatewayServer(
     wakeMode: "now" | "next-heartbeat";
     sessionKey: string;
     deliver: boolean;
-    channel:
-    | "last"
-    | "telegram";
+    channel: "last" | "telegram";
     to?: string;
     thinking?: string;
     timeoutSeconds?: number;
@@ -1479,8 +1477,11 @@ export async function startGatewayServer(
   };
 
   // ── In-memory audit log ring buffer — delegated to ctx ──
-  const appendAudit = (action: string, detail: string, agentId?: string | null) =>
-    ctx.appendAudit(action, detail, agentId);
+  const appendAudit = (
+    action: string,
+    detail: string,
+    agentId?: string | null,
+  ) => ctx.appendAudit(action, detail, agentId);
   const auditLog = ctx.auditLog;
   const SSE_CLIENTS = ctx.sseClients;
 
@@ -1503,13 +1504,20 @@ export async function startGatewayServer(
       // Replay last 50 entries
       const recent = auditLog.slice(-50);
       for (const entry of recent) {
-        res.write("data: " + JSON.stringify(entry) + "\n\n");
+        res.write(`data: ${JSON.stringify(entry)}\n\n`);
       }
       SSE_CLIENTS.add(res);
-      req.on("close", () => { SSE_CLIENTS.delete(res); });
+      req.on("close", () => {
+        SSE_CLIENTS.delete(res);
+      });
       // Heartbeat to keep connection alive
       const hb = setInterval(() => {
-        try { res.write(": heartbeat\n\n"); } catch { clearInterval(hb); SSE_CLIENTS.delete(res); }
+        try {
+          res.write(": heartbeat\n\n");
+        } catch {
+          clearInterval(hb);
+          SSE_CLIENTS.delete(res);
+        }
       }, 15000);
       req.on("close", () => clearInterval(hb));
       return true;
@@ -1517,7 +1525,7 @@ export async function startGatewayServer(
 
     // Polling fallback: /api/audit/recent?n=N
     if (pathname === "/api/audit/recent" || pathname === "/api/logs") {
-      const n = Math.min(parseInt(url.searchParams.get("n") ?? "100"), 500);
+      const n = Math.min(parseInt(url.searchParams.get("n") ?? "100", 10), 500);
       const entries = auditLog.slice(-n);
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -1564,7 +1572,7 @@ export async function startGatewayServer(
     try {
       // Canonicalize and check it's within uiDir (prevent path traversal)
       const real = await fs.promises.realpath(filePath).catch(() => null);
-      if (!real || !real.startsWith(uiDir + path.sep) && real !== uiDir) {
+      if (!real || (!real.startsWith(uiDir + path.sep) && real !== uiDir)) {
         return false;
       }
       const stat = await fs.promises.stat(real);
@@ -1592,9 +1600,15 @@ export async function startGatewayServer(
 
     // Serve / and /ui → index
     if (pathname === "/" || pathname === "/ui" || pathname === "/ui/") {
-      const head = await fs.promises.readFile(path.join(uiDir, "index_head.html"), "utf8");
-      const body = await fs.promises.readFile(path.join(uiDir, "index_body.html"), "utf8");
-      const html = head.replace("</head>", "") + body + "</html>";
+      const head = await fs.promises.readFile(
+        path.join(uiDir, "index_head.html"),
+        "utf8",
+      );
+      const body = await fs.promises.readFile(
+        path.join(uiDir, "index_body.html"),
+        "utf8",
+      );
+      const html = `${head.replace("</head>", "") + body}</html>`;
       res.statusCode = 200;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Cache-Control", "no-cache");
@@ -1636,7 +1650,9 @@ export async function startGatewayServer(
     }
     // DELETE /api/mcp/servers/:name
     if (pathname.startsWith("/api/mcp/servers/") && method === "DELETE") {
-      const name = decodeURIComponent(pathname.slice("/api/mcp/servers/".length));
+      const name = decodeURIComponent(
+        pathname.slice("/api/mcp/servers/".length),
+      );
       if (name) {
         await handleMcpRemove(res, name, cfg);
         return true;
@@ -1769,7 +1785,7 @@ export async function startGatewayServer(
       const cfg = loadConfig();
       // Use sessionKey from payload if specified, otherwise default to cron job scoped key
       const sessionKey =
-        (job.payload.kind === "agentTurn" && job.payload.sessionKey?.trim())
+        job.payload.kind === "agentTurn" && job.payload.sessionKey?.trim()
           ? job.payload.sessionKey.trim()
           : `cron:${job.id}`;
       return await runCronIsolatedAgentTurn({
@@ -1808,7 +1824,6 @@ export async function startGatewayServer(
       }
     },
   });
-
 
   const startTelegramProvider = async () => {
     if (ctx.telegramTask || ctx.telegramStarting) return;
@@ -1918,14 +1933,15 @@ export async function startGatewayServer(
     };
   };
 
-
   const startProviders = async () => {
     await startTelegramProvider();
     const cfg = loadConfig();
     if (cfg.lark?.appId && cfg.lark?.appSecret && cfg.lark?.enabled !== false) {
       startLarkProvider()
         .then(() => logLark.info("provider started"))
-        .catch((err) => logLark.error(`provider failed to start: ${String(err)}`));
+        .catch((err) =>
+          logLark.error(`provider failed to start: ${String(err)}`),
+        );
     }
   };
 
@@ -1960,23 +1976,41 @@ export async function startGatewayServer(
     // Append gateway events to in-memory audit log for /api/logs/stream
     if (event === "agent") {
       const p = payload as Record<string, unknown> | null | undefined;
-      const sk = (p as Record<string, string> | undefined)?.sessionKey ?? "main";
+      const sk =
+        (p as Record<string, string> | undefined)?.sessionKey ?? "main";
       const model = (p as Record<string, string> | undefined)?.model ?? "";
-      appendAudit("AgentMessage", `Response from ${sk}${model ? " (" + model + ")" : ""}`, sk);
+      appendAudit(
+        "AgentMessage",
+        `Response from ${sk}${model ? ` (${model})` : ""}`,
+        sk,
+      );
     } else if (event === "agent.tool" || event === "tool") {
       const p = payload as Record<string, unknown> | null | undefined;
-      const sk = (p as Record<string, string> | undefined)?.sessionKey ?? "main";
-      const tool = (p as Record<string, string> | undefined)?.toolName ?? (p as Record<string, string> | undefined)?.tool ?? "unknown";
+      const sk =
+        (p as Record<string, string> | undefined)?.sessionKey ?? "main";
+      const tool =
+        (p as Record<string, string> | undefined)?.toolName ??
+        (p as Record<string, string> | undefined)?.tool ??
+        "unknown";
       appendAudit("ToolInvoke", `Tool: ${tool} in ${sk}`, sk);
     } else if (event === "session.reset") {
       const p = payload as Record<string, unknown> | null | undefined;
-      appendAudit("SessionReset", `Session reset: ${(p as Record<string, string> | undefined)?.sessionKey ?? "?"}`);
+      appendAudit(
+        "SessionReset",
+        `Session reset: ${(p as Record<string, string> | undefined)?.sessionKey ?? "?"}`,
+      );
     } else if (event === "cron.fired" || event === "cron.run") {
       const p = payload as Record<string, unknown> | null | undefined;
-      appendAudit("TriggerFired", `Cron fired: ${(p as Record<string, string> | undefined)?.id ?? (p as Record<string, string> | undefined)?.name ?? "?"}`);
+      appendAudit(
+        "TriggerFired",
+        `Cron fired: ${(p as Record<string, string> | undefined)?.id ?? (p as Record<string, string> | undefined)?.name ?? "?"}`,
+      );
     } else if (event === "skills.installed") {
       const p = payload as Record<string, unknown> | null | undefined;
-      appendAudit("SkillInstalled", `Skill installed: ${(p as Record<string, string> | undefined)?.name ?? "?"}`);
+      appendAudit(
+        "SkillInstalled",
+        `Skill installed: ${(p as Record<string, string> | undefined)?.name ?? "?"}`,
+      );
     }
     for (const c of clients) {
       const slow = c.socket.bufferedAmount > MAX_BUFFERED_BYTES;
@@ -2237,22 +2271,40 @@ export async function startGatewayServer(
           // Sync models.json immediately so Pi SDK picks up new providers without
           // requiring a gateway restart or waiting for the first agent run.
           ensureClawdisModelsJson(validated.config).catch((err) => {
-            logProviders.warn(`models.json sync after config.set failed: ${formatError(err)}`);
+            logProviders.warn(
+              `models.json sync after config.set failed: ${formatError(err)}`,
+            );
           });
           // Bust model catalog cache so next models.list reflects new providers.
           resetModelCatalogCacheForTest();
           await stopTelegramProvider();
           startTelegramProvider().catch((err) => {
-            logTelegram.error(`config update telegram spawn failed: ${formatError(err)}`);
+            logTelegram.error(
+              `config update telegram spawn failed: ${formatError(err)}`,
+            );
           });
-          stopLarkProvider().catch(() => { /* ignore */ }).then(() => {
-            const newCfg = loadConfig();
-            if (newCfg.lark?.appId && newCfg.lark?.appSecret && newCfg.lark?.enabled !== false) {
-              startLarkProvider()
-                .then(() => logLark.info("provider restarted after config update"))
-                .catch((err) => logLark.error(`config update lark spawn failed: ${formatError(err)}`));
-            }
-          });
+          stopLarkProvider()
+            .catch(() => {
+              /* ignore */
+            })
+            .then(() => {
+              const newCfg = loadConfig();
+              if (
+                newCfg.lark?.appId &&
+                newCfg.lark?.appSecret &&
+                newCfg.lark?.enabled !== false
+              ) {
+                startLarkProvider()
+                  .then(() =>
+                    logLark.info("provider restarted after config update"),
+                  )
+                  .catch((err) =>
+                    logLark.error(
+                      `config update lark spawn failed: ${formatError(err)}`,
+                    ),
+                  );
+              }
+            });
           return {
             ok: true,
             payloadJSON: JSON.stringify({
@@ -2350,9 +2402,9 @@ export async function startGatewayServer(
           const existing = store[key];
           const next: SessionEntry = existing
             ? {
-              ...existing,
-              updatedAt: Math.max(existing.updatedAt ?? 0, now),
-            }
+                ...existing,
+                updatedAt: Math.max(existing.updatedAt ?? 0, now),
+              }
             : { sessionId: randomUUID(), updatedAt: now };
 
           if ("thinkingLevel" in p) {
@@ -2415,26 +2467,28 @@ export async function startGatewayServer(
           if ("modelOverride" in p) {
             const raw = p.modelOverride;
             if (raw === null) {
+              delete next.model;
               delete next.modelOverride;
               delete next.providerOverride;
             } else if (raw !== undefined) {
-              // Accept "provider/model" or just "model"
-              const parts = String(raw).split("/");
-              if (parts.length >= 2) {
-                next.providerOverride = parts[0];
-                next.modelOverride = parts.slice(1).join("/");
-              } else {
-                next.modelOverride = String(raw);
+              let normalized = String(raw).trim();
+              // If bare model ID (no provider prefix), look up provider from config
+              if (!normalized.includes("/")) {
+                const providers = cfg.models?.providers ?? {};
+                for (const [provId, provCfg] of Object.entries(providers)) {
+                  const models = (provCfg as { models?: { id: string }[] })
+                    .models;
+                  if (
+                    models?.some((m: { id: string }) => m.id === normalized)
+                  ) {
+                    normalized = `${provId}/${normalized}`;
+                    break;
+                  }
+                }
               }
-            }
-          }
-
-          if ("providerOverride" in p) {
-            const raw = p.providerOverride;
-            if (raw === null) {
+              next.model = normalized;
+              delete next.modelOverride;
               delete next.providerOverride;
-            } else if (raw !== undefined) {
-              next.providerOverride = String(raw);
             }
           }
 
@@ -2449,6 +2503,44 @@ export async function startGatewayServer(
 
           store[key] = next;
           await saveSessionStore(storePath, store);
+
+          // Write model change notification to session transcript so agent history
+          // reflects the switch. readSessionMessages() only reads entries with a
+          // .message field, so we use type:"message" with role:"user".
+          // Must use existing.sessionId (current active session), not next.sessionId.
+          if (
+            "modelOverride" in p &&
+            p.modelOverride !== null &&
+            next.model &&
+            existing?.sessionId &&
+            next.model !== existing.model
+          ) {
+            const candidates = resolveSessionTranscriptCandidates(
+              existing.sessionId,
+              storePath,
+            );
+            const transcriptFile = candidates.find((c) => fs.existsSync(c));
+            if (transcriptFile) {
+              try {
+                const marker = {
+                  type: "message",
+                  timestamp: new Date().toISOString(),
+                  message: {
+                    role: "user",
+                    content: `[System notification: Model switched to ${next.model}]`,
+                  },
+                };
+                fs.appendFileSync(
+                  transcriptFile,
+                  `${JSON.stringify(marker)}\n`,
+                  "utf-8",
+                );
+              } catch {
+                // non-critical — agent will still use correct model from session entry
+              }
+            }
+          }
+
           const payload: SessionsPatchResult = {
             ok: true,
             path: storePath,
@@ -2483,6 +2575,38 @@ export async function startGatewayServer(
 
           const { storePath, store, entry } = loadSessionEntry(key);
           const now = Date.now();
+
+          // Archive current session under a suffixed key so it appears in Sessions page.
+          // Limit archived sessions per base key to 20 to prevent unbounded growth.
+          if (entry) {
+            const archiveKey = `${key}:${entry.sessionId.slice(0, 8)}`;
+            if (!store[archiveKey]) {
+              // Auto-generate a display name for the archived session if not set.
+              const archiveDisplayName =
+                entry.displayName ??
+                (() => {
+                  const d = new Date(entry.updatedAt);
+                  const pad = (n: number) => String(n).padStart(2, "0");
+                  return `Chat ${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                })();
+              store[archiveKey] = { ...entry, displayName: archiveDisplayName };
+            }
+
+            // Prune oldest archived sessions if over limit (keep 20 most recent).
+            const archivePrefix = `${key}:`;
+            const archiveKeys = Object.keys(store)
+              .filter((k) => k.startsWith(archivePrefix))
+              .sort(
+                (a, b) =>
+                  (store[a]?.updatedAt ?? 0) - (store[b]?.updatedAt ?? 0),
+              );
+            if (archiveKeys.length > 20) {
+              for (const old of archiveKeys.slice(0, archiveKeys.length - 20)) {
+                delete store[old];
+              }
+            }
+          }
+
           const next: SessionEntry = {
             sessionId: randomUUID(),
             updatedAt: now,
@@ -2492,7 +2616,7 @@ export async function startGatewayServer(
             verboseLevel: entry?.verboseLevel,
             model: entry?.model,
             contextTokens: entry?.contextTokens,
-            displayName: entry?.displayName,
+            // displayName intentionally omitted — new session gets auto-generated name
             chatType: entry?.chatType,
             surface: entry?.surface,
             subject: entry?.subject,
@@ -2801,10 +2925,10 @@ export async function startGatewayServer(
                   ? a.content
                   : ArrayBuffer.isView(a?.content)
                     ? Buffer.from(
-                      a.content.buffer,
-                      a.content.byteOffset,
-                      a.content.byteLength,
-                    ).toString("base64")
+                        a.content.buffer,
+                        a.content.byteOffset,
+                        a.content.byteLength,
+                      ).toString("base64")
                     : undefined,
             })) ?? [];
 
@@ -2830,9 +2954,23 @@ export async function startGatewayServer(
           const { storePath, store, entry } = loadSessionEntry(p.sessionKey);
           const now = Date.now();
           const sessionId = entry?.sessionId ?? randomUUID();
+
+          // Session mới → inherit model từ config default
+          const inheritedModel = (() => {
+            if (entry?.model) return entry.model;
+            const cfg = loadConfig();
+            const configModel = resolveConfiguredModelRef({
+              cfg,
+              defaultProvider: DEFAULT_PROVIDER,
+              defaultModel: DEFAULT_MODEL,
+            });
+            return `${configModel.provider}/${configModel.model}`;
+          })();
+
           const sessionEntry: SessionEntry = {
             sessionId,
             updatedAt: now,
+            model: inheritedModel,
             thinkingLevel: entry?.thinkingLevel,
             verboseLevel: entry?.verboseLevel,
             systemSent: entry?.systemSent,
@@ -3029,10 +3167,7 @@ export async function startGatewayServer(
         const channelRaw =
           typeof link?.channel === "string" ? link.channel.trim() : "";
         const channel = channelRaw.toLowerCase();
-        const provider =
-          channel === "telegram"
-            ? channel
-            : undefined;
+        const provider = channel === "telegram" ? channel : undefined;
         const to =
           typeof link?.to === "string" && link.to.trim()
             ? link.to.trim()
@@ -3279,7 +3414,10 @@ export async function startGatewayServer(
 
   ctx.broadcastHealthUpdate = (snap: HealthSummary) => {
     broadcast("health", snap, {
-      stateVersion: { presence: ctx.presenceVersion, health: ctx.healthVersion },
+      stateVersion: {
+        presence: ctx.presenceVersion,
+        health: ctx.healthVersion,
+      },
     });
     bridgeSendToAllSubscribed("health", snap);
   };
@@ -3373,19 +3511,34 @@ export async function startGatewayServer(
             broadcast("chat", payload, { dropIfSlow: true });
             bridgeSendToSession(sessionKey, "chat", payload);
           }
-        } else if (evt.stream === "tool" && typeof evt.data?.phase === "string") {
+        } else if (
+          evt.stream === "tool" &&
+          typeof evt.data?.phase === "string"
+        ) {
           const phase = evt.data.phase as string;
           const toolName = (evt.data.name as string | undefined) ?? "unknown";
           const toolCallId = (evt.data.toolCallId as string | undefined) ?? "";
           const base = { runId: clientRunId, sessionKey, seq: evt.seq };
           if (phase === "start") {
-            const toolPayload = { ...base, state: "tool_start" as const, tool: toolName, toolCallId };
+            const toolPayload = {
+              ...base,
+              state: "tool_start" as const,
+              tool: toolName,
+              toolCallId,
+            };
             broadcast("chat", toolPayload, { dropIfSlow: true });
             bridgeSendToSession(sessionKey, "chat", toolPayload);
           } else if (phase === "result") {
             const meta = (evt.data.meta as string | undefined) ?? "";
             const isError = Boolean(evt.data.isError);
-            const toolPayload = { ...base, state: "tool_result" as const, tool: toolName, toolCallId, result: meta, is_error: isError };
+            const toolPayload = {
+              ...base,
+              state: "tool_result" as const,
+              tool: toolName,
+              toolCallId,
+              result: meta,
+              is_error: isError,
+            };
             broadcast("chat", toolPayload, { dropIfSlow: true });
             bridgeSendToSession(sessionKey, "chat", toolPayload);
           }
@@ -3411,14 +3564,23 @@ export async function startGatewayServer(
               state: "final",
               message: text
                 ? {
-                  role: "assistant",
-                  content: [{ type: "text", text }],
-                  timestamp: Date.now(),
-                }
+                    role: "assistant",
+                    content: [{ type: "text", text }],
+                    timestamp: Date.now(),
+                  }
                 : undefined,
-              input_tokens: typeof evt.data?.input_tokens === "number" ? evt.data.input_tokens : undefined,
-              output_tokens: typeof evt.data?.output_tokens === "number" ? evt.data.output_tokens : undefined,
-              cost_usd: typeof evt.data?.cost_usd === "number" ? evt.data.cost_usd : undefined,
+              input_tokens:
+                typeof evt.data?.input_tokens === "number"
+                  ? evt.data.input_tokens
+                  : undefined,
+              output_tokens:
+                typeof evt.data?.output_tokens === "number"
+                  ? evt.data.output_tokens
+                  : undefined,
+              cost_usd:
+                typeof evt.data?.cost_usd === "number"
+                  ? evt.data.cost_usd
+                  : undefined,
             };
             broadcast("chat", payload);
             bridgeSendToSession(finishedSessionKey, "chat", payload);
@@ -3460,19 +3622,34 @@ export async function startGatewayServer(
             broadcast("chat", payload, { dropIfSlow: true });
             bridgeSendToSession(sessionKey, "chat", payload);
           }
-        } else if (evt.stream === "tool" && typeof evt.data?.phase === "string") {
+        } else if (
+          evt.stream === "tool" &&
+          typeof evt.data?.phase === "string"
+        ) {
           const phase = evt.data.phase as string;
           const toolName = (evt.data.name as string | undefined) ?? "unknown";
           const toolCallId = (evt.data.toolCallId as string | undefined) ?? "";
           const base = { runId: clientRunId, sessionKey, seq: evt.seq };
           if (phase === "start") {
-            const toolPayload = { ...base, state: "tool_start" as const, tool: toolName, toolCallId };
+            const toolPayload = {
+              ...base,
+              state: "tool_start" as const,
+              tool: toolName,
+              toolCallId,
+            };
             broadcast("chat", toolPayload, { dropIfSlow: true });
             bridgeSendToSession(sessionKey, "chat", toolPayload);
           } else if (phase === "result") {
             const meta = (evt.data.meta as string | undefined) ?? "";
             const isError = Boolean(evt.data.isError);
-            const toolPayload = { ...base, state: "tool_result" as const, tool: toolName, toolCallId, result: meta, is_error: isError };
+            const toolPayload = {
+              ...base,
+              state: "tool_result" as const,
+              tool: toolName,
+              toolCallId,
+              result: meta,
+              is_error: isError,
+            };
             broadcast("chat", toolPayload, { dropIfSlow: true });
             bridgeSendToSession(sessionKey, "chat", toolPayload);
           }
@@ -3491,14 +3668,23 @@ export async function startGatewayServer(
               state: "final",
               message: text
                 ? {
-                  role: "assistant",
-                  content: [{ type: "text", text }],
-                  timestamp: Date.now(),
-                }
+                    role: "assistant",
+                    content: [{ type: "text", text }],
+                    timestamp: Date.now(),
+                  }
                 : undefined,
-              input_tokens: typeof evt.data?.input_tokens === "number" ? evt.data.input_tokens : undefined,
-              output_tokens: typeof evt.data?.output_tokens === "number" ? evt.data.output_tokens : undefined,
-              cost_usd: typeof evt.data?.cost_usd === "number" ? evt.data.cost_usd : undefined,
+              input_tokens:
+                typeof evt.data?.input_tokens === "number"
+                  ? evt.data.input_tokens
+                  : undefined,
+              output_tokens:
+                typeof evt.data?.output_tokens === "number"
+                  ? evt.data.output_tokens
+                  : undefined,
+              cost_usd:
+                typeof evt.data?.cost_usd === "number"
+                  ? evt.data.cost_usd
+                  : undefined,
             };
             broadcast("chat", payload);
             bridgeSendToSession(sessionKey, "chat", payload);
@@ -3519,9 +3705,14 @@ export async function startGatewayServer(
 
     if (jobState === "done") {
       // Persist usage record for analytics
-      const inTok = typeof evt.data?.input_tokens === "number" ? evt.data.input_tokens : 0;
-      const outTok = typeof evt.data?.output_tokens === "number" ? evt.data.output_tokens : 0;
-      const costUsd = typeof evt.data?.cost_usd === "number" ? evt.data.cost_usd : 0;
+      const inTok =
+        typeof evt.data?.input_tokens === "number" ? evt.data.input_tokens : 0;
+      const outTok =
+        typeof evt.data?.output_tokens === "number"
+          ? evt.data.output_tokens
+          : 0;
+      const costUsd =
+        typeof evt.data?.cost_usd === "number" ? evt.data.cost_usd : 0;
       if (inTok > 0 || outTok > 0) {
         const now = new Date();
         const resolvedSessionKey =
@@ -3532,8 +3723,11 @@ export async function startGatewayServer(
           (typeof evt.data?.model === "string" && evt.data.model.trim()
             ? evt.data.model.trim()
             : undefined) ??
-          (loadSessionStore(resolveStorePath(loadConfig().session?.store))[resolvedSessionKey]?.model) ??
-          (loadConfig().agent?.model ?? "unknown");
+          loadSessionStore(resolveStorePath(loadConfig().session?.store))[
+            resolvedSessionKey
+          ]?.model ??
+          loadConfig().agent?.model ??
+          "unknown";
         appendUsageEvent({
           ts: now.toISOString(),
           date: now.toISOString().slice(0, 10),
@@ -3543,7 +3737,10 @@ export async function startGatewayServer(
           output_tokens: outTok,
           cost_usd: costUsd,
           tool_calls: 0,
-          duration_ms: typeof evt.data?.durationMs === "number" ? evt.data.durationMs : undefined,
+          duration_ms:
+            typeof evt.data?.durationMs === "number"
+              ? evt.data.durationMs
+              : undefined,
         });
       }
     }
@@ -3623,7 +3820,10 @@ export async function startGatewayServer(
           { presence: listSystemPresence() },
           {
             dropIfSlow: true,
-            stateVersion: { presence: ctx.presenceVersion, health: ctx.healthVersion },
+            stateVersion: {
+              presence: ctx.presenceVersion,
+              health: ctx.healthVersion,
+            },
           },
         );
       }
@@ -3968,7 +4168,11 @@ export async function startGatewayServer(
               }
 
               const larkCfg = loadConfig().lark;
-              const larkConfigured = !!(larkCfg?.appId && larkCfg?.appSecret && larkCfg?.enabled !== false);
+              const larkConfigured = !!(
+                larkCfg?.appId &&
+                larkCfg?.appSecret &&
+                larkCfg?.enabled !== false
+              );
               respond(
                 true,
                 {
@@ -3998,21 +4202,48 @@ export async function startGatewayServer(
               // Hot-reload Lark provider after config change (mirrors openfang channel configure flow)
               const cfg = loadConfig();
               if (!cfg.lark?.appId || !cfg.lark?.appSecret) {
-                respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "Lark not configured (appId + appSecret required)"));
+                respond(
+                  false,
+                  undefined,
+                  errorShape(
+                    ErrorCodes.INVALID_REQUEST,
+                    "Lark not configured (appId + appSecret required)",
+                  ),
+                );
                 break;
               }
               if (cfg.lark.enabled === false) {
-                respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "Lark disabled in config"));
+                respond(
+                  false,
+                  undefined,
+                  errorShape(
+                    ErrorCodes.INVALID_REQUEST,
+                    "Lark disabled in config",
+                  ),
+                );
                 break;
               }
               try {
-                await stopLarkProvider().catch(() => { /* ignore if not running */ });
+                await stopLarkProvider().catch(() => {
+                  /* ignore if not running */
+                });
                 await startLarkProvider();
                 logLark.info("provider reloaded via channels.lark.reload");
-                respond(true, { ok: true, port: cfg.lark.webhookPort ?? 18792, running: true });
+                respond(true, {
+                  ok: true,
+                  port: cfg.lark.webhookPort ?? 18792,
+                  running: true,
+                });
               } catch (err) {
                 logLark.error(`reload failed: ${formatError(err)}`);
-                respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Lark reload failed: ${formatError(err)}`));
+                respond(
+                  false,
+                  undefined,
+                  errorShape(
+                    ErrorCodes.UNAVAILABLE,
+                    `Lark reload failed: ${formatError(err)}`,
+                  ),
+                );
               }
               break;
             }
@@ -4174,10 +4405,10 @@ export async function startGatewayServer(
                       ? a.content
                       : ArrayBuffer.isView(a?.content)
                         ? Buffer.from(
-                          a.content.buffer,
-                          a.content.byteOffset,
-                          a.content.byteLength,
-                        ).toString("base64")
+                            a.content.buffer,
+                            a.content.byteOffset,
+                            a.content.byteLength,
+                          ).toString("base64")
                         : undefined,
                 })) ?? [];
               let messageWithAttachments = p.message;
@@ -4307,31 +4538,59 @@ export async function startGatewayServer(
               break;
             }
             case "cron.list": {
-              await handleCronList((req.params ?? {}) as Record<string, unknown>, cron, respond);
+              await handleCronList(
+                (req.params ?? {}) as Record<string, unknown>,
+                cron,
+                respond,
+              );
               break;
             }
             case "cron.status": {
-              await handleCronStatus((req.params ?? {}) as Record<string, unknown>, cron, respond);
+              await handleCronStatus(
+                (req.params ?? {}) as Record<string, unknown>,
+                cron,
+                respond,
+              );
               break;
             }
             case "cron.add": {
-              await handleCronAdd((req.params ?? {}) as Record<string, unknown>, cron, respond);
+              await handleCronAdd(
+                (req.params ?? {}) as Record<string, unknown>,
+                cron,
+                respond,
+              );
               break;
             }
             case "cron.update": {
-              await handleCronUpdate((req.params ?? {}) as Record<string, unknown>, cron, respond);
+              await handleCronUpdate(
+                (req.params ?? {}) as Record<string, unknown>,
+                cron,
+                respond,
+              );
               break;
             }
             case "cron.remove": {
-              await handleCronRemove((req.params ?? {}) as Record<string, unknown>, cron, respond);
+              await handleCronRemove(
+                (req.params ?? {}) as Record<string, unknown>,
+                cron,
+                respond,
+              );
               break;
             }
             case "cron.run": {
-              await handleCronRun((req.params ?? {}) as Record<string, unknown>, cron, respond);
+              await handleCronRun(
+                (req.params ?? {}) as Record<string, unknown>,
+                cron,
+                respond,
+              );
               break;
             }
             case "cron.runs": {
-              await handleCronRuns((req.params ?? {}) as Record<string, unknown>, cronStorePath, respond);
+              await handleCronRuns(
+                (req.params ?? {}) as Record<string, unknown>,
+                cronStorePath,
+                respond,
+              );
               break;
             }
             case "status": {
@@ -4473,21 +4732,39 @@ export async function startGatewayServer(
               }
               await writeConfigFile(validated.config);
               ensureClawdisModelsJson(validated.config).catch((err) => {
-                logProviders.warn(`models.json sync after config.set failed: ${formatError(err)}`);
+                logProviders.warn(
+                  `models.json sync after config.set failed: ${formatError(err)}`,
+                );
               });
               resetModelCatalogCacheForTest();
               await stopTelegramProvider();
               startTelegramProvider().catch((err) => {
-                logTelegram.error(`config update telegram spawn failed: ${formatError(err)}`);
+                logTelegram.error(
+                  `config update telegram spawn failed: ${formatError(err)}`,
+                );
               });
-              stopLarkProvider().catch(() => { /* ignore */ }).then(() => {
-                const newCfg = loadConfig();
-                if (newCfg.lark?.appId && newCfg.lark?.appSecret && newCfg.lark?.enabled !== false) {
-                  startLarkProvider()
-                    .then(() => logLark.info("provider restarted after config update"))
-                    .catch((err) => logLark.error(`config update lark spawn failed: ${formatError(err)}`));
-                }
-              });
+              stopLarkProvider()
+                .catch(() => {
+                  /* ignore */
+                })
+                .then(() => {
+                  const newCfg = loadConfig();
+                  if (
+                    newCfg.lark?.appId &&
+                    newCfg.lark?.appSecret &&
+                    newCfg.lark?.enabled !== false
+                  ) {
+                    startLarkProvider()
+                      .then(() =>
+                        logLark.info("provider restarted after config update"),
+                      )
+                      .catch((err) =>
+                        logLark.error(
+                          `config update lark spawn failed: ${formatError(err)}`,
+                        ),
+                      );
+                  }
+                });
               respond(
                 true,
                 {
@@ -4537,31 +4814,59 @@ export async function startGatewayServer(
               break;
             }
             case "skills.status": {
-              await handleSkillsStatus((req.params ?? {}) as Record<string, unknown>, respond);
+              await handleSkillsStatus(
+                (req.params ?? {}) as Record<string, unknown>,
+                respond,
+              );
               break;
             }
             case "skills.install": {
-              await handleSkillsInstall((req.params ?? {}) as Record<string, unknown>, respond);
+              await handleSkillsInstall(
+                (req.params ?? {}) as Record<string, unknown>,
+                respond,
+              );
               break;
             }
             case "skills.update": {
-              await handleSkillsUpdate((req.params ?? {}) as Record<string, unknown>, respond);
+              await handleSkillsUpdate(
+                (req.params ?? {}) as Record<string, unknown>,
+                respond,
+              );
               break;
             }
             case "skills.uninstall": {
-              await handleSkillsUninstall((req.params ?? {}) as Record<string, unknown>, respond);
+              await handleSkillsUninstall(
+                (req.params ?? {}) as Record<string, unknown>,
+                respond,
+              );
               break;
             }
             case "skills.clawhub-install": {
-              await handleSkillsClawHubInstall((req.params ?? {}) as Record<string, unknown>, respond, broadcast);
+              await handleSkillsClawHubInstall(
+                (req.params ?? {}) as Record<string, unknown>,
+                respond,
+                broadcast,
+              );
               break;
             }
 
             // ── Usage analytics ────────────────────────────────────────────
-            case "usage.summary": { handleUsageSummary(respond); break; }
-            case "usage.by-model": { handleUsageByModel(respond); break; }
-            case "usage.by-agent": { handleUsageByAgent(respond); break; }
-            case "usage.daily": { handleUsageDaily(respond); break; }
+            case "usage.summary": {
+              handleUsageSummary(respond);
+              break;
+            }
+            case "usage.by-model": {
+              handleUsageByModel(respond);
+              break;
+            }
+            case "usage.by-agent": {
+              handleUsageByAgent(respond);
+              break;
+            }
+            case "usage.daily": {
+              handleUsageDaily(respond);
+              break;
+            }
 
             case "sessions.list": {
               const params = (req.params ?? {}) as Record<string, unknown>;
@@ -4621,9 +4926,9 @@ export async function startGatewayServer(
               const existing = store[key];
               const next: SessionEntry = existing
                 ? {
-                  ...existing,
-                  updatedAt: Math.max(existing.updatedAt ?? 0, now),
-                }
+                    ...existing,
+                    updatedAt: Math.max(existing.updatedAt ?? 0, now),
+                  }
                 : { sessionId: randomUUID(), updatedAt: now };
 
               if ("thinkingLevel" in p) {
@@ -4688,6 +4993,34 @@ export async function startGatewayServer(
                     break;
                   }
                   next.groupActivation = normalized;
+                }
+              }
+
+              if ("modelOverride" in p) {
+                const raw = p.modelOverride;
+                if (raw === null) {
+                  delete next.model;
+                  delete next.modelOverride;
+                  delete next.providerOverride;
+                } else if (raw !== undefined) {
+                  let normalized = String(raw).trim();
+                  // If bare model ID (no provider prefix), look up provider from config
+                  if (!normalized.includes("/")) {
+                    const providers = cfg.models?.providers ?? {};
+                    for (const [provId, provCfg] of Object.entries(providers)) {
+                      const models = (provCfg as { models?: { id: string }[] })
+                        .models;
+                      if (
+                        models?.some((m: { id: string }) => m.id === normalized)
+                      ) {
+                        normalized = `${provId}/${normalized}`;
+                        break;
+                      }
+                    }
+                  }
+                  next.model = normalized;
+                  delete next.modelOverride;
+                  delete next.providerOverride;
                 }
               }
 
@@ -4958,14 +5291,14 @@ export async function startGatewayServer(
                   : undefined;
               const lastInputSeconds =
                 typeof params.lastInputSeconds === "number" &&
-                  Number.isFinite(params.lastInputSeconds)
+                Number.isFinite(params.lastInputSeconds)
                   ? params.lastInputSeconds
                   : undefined;
               const reason =
                 typeof params.reason === "string" ? params.reason : undefined;
               const tags =
                 Array.isArray(params.tags) &&
-                  params.tags.every((t) => typeof t === "string")
+                params.tags.every((t) => typeof t === "string")
                   ? (params.tags as string[])
                   : undefined;
               const presenceUpdate = updateSystemPresence({
@@ -5534,12 +5867,12 @@ export async function startGatewayServer(
                 const payload =
                   typeof res.payloadJSON === "string" && res.payloadJSON.trim()
                     ? (() => {
-                      try {
-                        return JSON.parse(res.payloadJSON) as unknown;
-                      } catch {
-                        return { payloadJSON: res.payloadJSON };
-                      }
-                    })()
+                        try {
+                          return JSON.parse(res.payloadJSON) as unknown;
+                        } catch {
+                          return { payloadJSON: res.payloadJSON };
+                        }
+                      })()
                     : undefined;
                 respond(
                   true,
@@ -5666,18 +5999,18 @@ export async function startGatewayServer(
 
               const requestedSessionKey =
                 typeof params.sessionKey === "string" &&
-                  params.sessionKey.trim()
+                params.sessionKey.trim()
                   ? params.sessionKey.trim()
                   : undefined;
               let resolvedSessionId = params.sessionId?.trim() || undefined;
               let sessionEntry: SessionEntry | undefined;
               let bestEffortDeliver = false;
-              let cfgForAgent: ReturnType<typeof loadConfig> | undefined;
+              let _cfgForAgent: ReturnType<typeof loadConfig> | undefined;
 
               if (requestedSessionKey) {
                 const { cfg, storePath, store, entry } =
                   loadSessionEntry(requestedSessionKey);
-                cfgForAgent = cfg;
+                _cfgForAgent = cfg;
                 const now = Date.now();
                 const sessionId = entry?.sessionId ?? randomUUID();
                 sessionEntry = {
@@ -5726,7 +6059,12 @@ export async function startGatewayServer(
               // Channels supported for delivery. Legacy "whatsapp"/"discord" entries
               // are normalised to "telegram" since those providers were removed.
               const normaliseChannel = (ch: string | undefined): string => {
-                if (!ch || ch === "webchat" || ch === "whatsapp" || ch === "discord") {
+                if (
+                  !ch ||
+                  ch === "webchat" ||
+                  ch === "whatsapp" ||
+                  ch === "discord"
+                ) {
                   return "telegram";
                 }
                 return ch;
@@ -5753,9 +6091,7 @@ export async function startGatewayServer(
                     ? params.to.trim()
                     : undefined;
                 if (explicit) return explicit;
-                if (
-                  resolvedChannel === "telegram"
-                ) {
+                if (resolvedChannel === "telegram") {
                   return lastTo || undefined;
                 }
                 return undefined;
@@ -5951,7 +6287,7 @@ export async function startGatewayServer(
       const reason = reasonRaw || "gateway stopping";
       const restartExpectedMs =
         typeof opts?.restartExpectedMs === "number" &&
-          Number.isFinite(opts.restartExpectedMs)
+        Number.isFinite(opts.restartExpectedMs)
           ? Math.max(0, Math.floor(opts.restartExpectedMs))
           : null;
       if (bonjourStop) {
@@ -5972,9 +6308,15 @@ export async function startGatewayServer(
         }
       }
       await stopTelegramProvider();
-      await stopLarkProvider().catch(() => { /* ignore */ });
+      await stopLarkProvider().catch(() => {
+        /* ignore */
+      });
       await stopGmailWatcher();
-      try { resetMcpManager(); } catch { /* ignore */ }
+      try {
+        resetMcpManager();
+      } catch {
+        /* ignore */
+      }
       cron.stop();
       heartbeatRunner.stop();
       broadcast("shutdown", {
@@ -6009,12 +6351,10 @@ export async function startGatewayServer(
       }
       clients.clear();
       if (stopBrowserControlServerIfStarted) {
-        await stopBrowserControlServerIfStarted().catch(() => { });
+        await stopBrowserControlServerIfStarted().catch(() => {});
       }
       await Promise.allSettled(
-        [ctx.telegramTask].filter(
-          Boolean,
-        ) as Array<Promise<unknown>>,
+        [ctx.telegramTask].filter(Boolean) as Array<Promise<unknown>>,
       );
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve, reject) =>

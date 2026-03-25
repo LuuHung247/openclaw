@@ -56,7 +56,9 @@ export async function loadModelCatalog(params?: {
       // that don't use models.json (no models[] array in config).
       const cfgProviders = cfg.models?.providers ?? {};
       for (const [ourId, sdkId] of Object.entries(PROVIDER_ALIASES)) {
-        const key = (cfgProviders[ourId] as { apiKey?: string } | undefined)?.apiKey?.trim();
+        const key = (
+          cfgProviders[ourId] as { apiKey?: string } | undefined
+        )?.apiKey?.trim();
         if (key) {
           authStorage.set(sdkId, { type: "api_key", key });
         }

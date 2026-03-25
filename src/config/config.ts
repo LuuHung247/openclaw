@@ -34,13 +34,13 @@ export type LoggingConfig = {
   level?: "silent" | "fatal" | "error" | "warn" | "info" | "debug" | "trace";
   file?: string;
   consoleLevel?:
-  | "silent"
-  | "fatal"
-  | "error"
-  | "warn"
-  | "info"
-  | "debug"
-  | "trace";
+    | "silent"
+    | "fatal"
+    | "error"
+    | "warn"
+    | "info"
+    | "debug"
+    | "trace";
   consoleStyle?: "pretty" | "compact" | "json";
 };
 
@@ -116,9 +116,7 @@ export type HookMappingConfig = {
   messageTemplate?: string;
   textTemplate?: string;
   deliver?: boolean;
-  channel?:
-  | "last"
-  | "telegram";
+  channel?: "last" | "telegram";
   to?: string;
   thinking?: string;
   timeoutSeconds?: number;
@@ -583,10 +581,7 @@ export type ClawdisConfig = {
       /** Heartbeat model override (provider/model). */
       model?: string;
       /** Delivery target (last|telegram|none). */
-      target?:
-      | "last"
-      | "telegram"
-      | "none";
+      target?: "last" | "telegram" | "none";
       /** Optional delivery override (E.164 for WhatsApp, chat id for Telegram). */
       to?: string;
       /** Override the heartbeat prompt body (default: "HEARTBEAT"). */
@@ -779,11 +774,7 @@ const HeartbeatSchema = z
     every: z.string().optional(),
     model: z.string().optional(),
     target: z
-      .union([
-        z.literal("last"),
-        z.literal("telegram"),
-        z.literal("none"),
-      ])
+      .union([z.literal("last"), z.literal("telegram"), z.literal("none")])
       .optional(),
     to: z.string().optional(),
     prompt: z.string().optional(),
@@ -836,12 +827,7 @@ const HookMappingSchema = z
     messageTemplate: z.string().optional(),
     textTemplate: z.string().optional(),
     deliver: z.boolean().optional(),
-    channel: z
-      .union([
-        z.literal("last"),
-        z.literal("telegram"),
-      ])
-      .optional(),
+    channel: z.union([z.literal("last"), z.literal("telegram")]).optional(),
     to: z.string().optional(),
     thinking: z.string().optional(),
     timeoutSeconds: z.number().int().positive().optional(),
@@ -1232,7 +1218,13 @@ const ClawdisSchema = z.object({
         .optional(),
       auth: z
         .object({
-          mode: z.union([z.literal("token"), z.literal("password"), z.literal("none")]).optional(),
+          mode: z
+            .union([
+              z.literal("token"),
+              z.literal("password"),
+              z.literal("none"),
+            ])
+            .optional(),
           token: z.string().optional(),
           password: z.string().optional(),
           allowTailscale: z.boolean().optional(),
@@ -1295,7 +1287,11 @@ const ClawdisSchema = z.object({
       z.object({
         name: z.string(),
         transport: z.discriminatedUnion("type", [
-          z.object({ type: z.literal("stdio"), command: z.string(), args: z.array(z.string()).optional() }),
+          z.object({
+            type: z.literal("stdio"),
+            command: z.string(),
+            args: z.array(z.string()).optional(),
+          }),
           z.object({ type: z.literal("sse"), url: z.string() }),
         ]),
         env: z.array(z.string()).optional(),
@@ -1395,11 +1391,11 @@ const LEGACY_CONFIG_MIGRATIONS: LegacyConfigMigration[] = [
       if (!routing || typeof routing !== "object") return;
       const groupChat =
         (routing as Record<string, unknown>).groupChat &&
-          typeof (routing as Record<string, unknown>).groupChat === "object"
+        typeof (routing as Record<string, unknown>).groupChat === "object"
           ? ((routing as Record<string, unknown>).groupChat as Record<
-            string,
-            unknown
-          >)
+              string,
+              unknown
+            >)
           : null;
       if (!groupChat) return;
       const requireMention = groupChat.requireMention;
@@ -1460,11 +1456,11 @@ const LEGACY_CONFIG_MIGRATIONS: LegacyConfigMigration[] = [
 
       const groups =
         (telegram as Record<string, unknown>).groups &&
-          typeof (telegram as Record<string, unknown>).groups === "object"
+        typeof (telegram as Record<string, unknown>).groups === "object"
           ? ((telegram as Record<string, unknown>).groups as Record<
-            string,
-            unknown
-          >)
+              string,
+              unknown
+            >)
           : {};
       const defaultKey = "*";
       const entry =

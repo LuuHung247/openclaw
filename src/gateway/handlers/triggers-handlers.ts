@@ -3,10 +3,7 @@
  */
 
 import type { TriggerEngine } from "../../triggers/index.js";
-import {
-  ErrorCodes,
-  errorShape,
-} from "../protocol/index.js";
+import { ErrorCodes, errorShape } from "../protocol/index.js";
 
 type RespondFn = (
   ok: boolean,
@@ -70,9 +67,10 @@ export async function handleTriggersCreate(
   deps: TriggersDeps,
   respond: RespondFn,
 ): Promise<void> {
-  const trigger = typeof params.trigger === "object" && params.trigger !== null
-    ? params.trigger as Record<string, unknown>
-    : undefined;
+  const trigger =
+    typeof params.trigger === "object" && params.trigger !== null
+      ? (params.trigger as Record<string, unknown>)
+      : undefined;
 
   if (!trigger) {
     respond(
@@ -93,15 +91,12 @@ export async function handleTriggersCreate(
       enabled: trigger.enabled !== false,
       pattern: trigger.pattern as never,
       action: trigger.action as never,
-      cooldownMs: typeof trigger.cooldownMs === "number" ? trigger.cooldownMs : undefined,
+      cooldownMs:
+        typeof trigger.cooldownMs === "number" ? trigger.cooldownMs : undefined,
     });
     respond(true, { trigger: created }, undefined);
   } catch (err) {
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.UNAVAILABLE, String(err)),
-    );
+    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
   }
 }
 
@@ -114,9 +109,10 @@ export async function handleTriggersUpdate(
   respond: RespondFn,
 ): Promise<void> {
   const id = typeof params.id === "string" ? params.id : undefined;
-  const updates = typeof params.updates === "object" && params.updates !== null
-    ? params.updates as Record<string, unknown>
-    : undefined;
+  const updates =
+    typeof params.updates === "object" && params.updates !== null
+      ? (params.updates as Record<string, unknown>)
+      : undefined;
 
   if (!id) {
     respond(
@@ -151,11 +147,7 @@ export async function handleTriggersUpdate(
     }
     respond(true, { trigger: updated }, undefined);
   } catch (err) {
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.UNAVAILABLE, String(err)),
-    );
+    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
   }
 }
 
@@ -181,11 +173,7 @@ export async function handleTriggersDelete(
     const deleted = await deps.triggerEngine.deleteTrigger(id);
     respond(true, { deleted }, undefined);
   } catch (err) {
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.UNAVAILABLE, String(err)),
-    );
+    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
   }
 }
 
@@ -198,9 +186,10 @@ export async function handleTriggersFire(
   respond: RespondFn,
 ): Promise<void> {
   const id = typeof params.id === "string" ? params.id : undefined;
-  const eventData = typeof params.eventData === "object" && params.eventData !== null
-    ? (params.eventData as Record<string, unknown>)
-    : {};
+  const eventData =
+    typeof params.eventData === "object" && params.eventData !== null
+      ? (params.eventData as Record<string, unknown>)
+      : {};
 
   if (!id) {
     respond(
@@ -217,17 +206,16 @@ export async function handleTriggersFire(
       respond(
         false,
         undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, `Trigger not found or not fired: ${id}`),
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `Trigger not found or not fired: ${id}`,
+        ),
       );
       return;
     }
     respond(true, { fire }, undefined);
   } catch (err) {
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.UNAVAILABLE, String(err)),
-    );
+    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
   }
 }
 
@@ -239,17 +227,14 @@ export async function handleTriggersFires(
   deps: TriggersDeps,
   respond: RespondFn,
 ): Promise<void> {
-  const triggerId = typeof params.triggerId === "string" ? params.triggerId : undefined;
+  const triggerId =
+    typeof params.triggerId === "string" ? params.triggerId : undefined;
   const limit = typeof params.limit === "number" ? params.limit : 100;
 
   try {
     const fires = deps.triggerEngine.listFires(triggerId, limit);
     respond(true, { fires }, undefined);
   } catch (err) {
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.UNAVAILABLE, String(err)),
-    );
+    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
   }
 }

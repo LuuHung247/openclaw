@@ -18,9 +18,7 @@ export type HookMappingResolved = {
   messageTemplate?: string;
   textTemplate?: string;
   deliver?: boolean;
-  channel?:
-    | "last"
-    | "telegram";
+  channel?: "last" | "telegram";
   to?: string;
   thinking?: string;
   timeoutSeconds?: number;
@@ -52,9 +50,7 @@ export type HookAction =
       wakeMode: "now" | "next-heartbeat";
       sessionKey?: string;
       deliver?: boolean;
-      channel?:
-        | "last"
-        | "telegram";
+      channel?: "last" | "telegram";
       to?: string;
       thinking?: string;
       timeoutSeconds?: number;

@@ -5,7 +5,7 @@
  * Lifecycle: connect() → initialize handshake → tools/list → call_tool() → dispose()
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 
 import type { McpServerConfig } from "../config/config.js";
 
@@ -55,7 +55,10 @@ function normalizeName(name: string): string {
   return name.toLowerCase().replace(/[-\s]+/g, "_");
 }
 
-export function formatMcpToolName(serverName: string, toolName: string): string {
+export function formatMcpToolName(
+  serverName: string,
+  toolName: string,
+): string {
   return `mcp_${normalizeName(serverName)}_${normalizeName(toolName)}`;
 }
 
@@ -109,7 +112,9 @@ export class McpClient {
     const { command, args = [] } = transport;
 
     // Build a safe env: start clean, add PATH + whitelisted vars only
-    const safeEnv: Record<string, string> = { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin" };
+    const safeEnv: Record<string, string> = {
+      PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+    };
     for (const key of this.config.env ?? []) {
       const val = process.env[key];
       if (val !== undefined) safeEnv[key] = val;
@@ -121,7 +126,9 @@ export class McpClient {
     });
 
     this.proc.stderr.on("data", (chunk: Buffer) => {
-      console.warn(`[mcp:${this.config.name}] stderr: ${chunk.toString().trim()}`);
+      console.warn(
+        `[mcp:${this.config.name}] stderr: ${chunk.toString().trim()}`,
+      );
     });
 
     this.proc.stdout.on("data", (chunk: Buffer) => {
@@ -161,7 +168,9 @@ export class McpClient {
     clearTimeout(pending.timer);
     this.pending.delete(msg.id);
     if (msg.error) {
-      pending.reject(new Error(`MCP error ${msg.error.code}: ${msg.error.message}`));
+      pending.reject(
+        new Error(`MCP error ${msg.error.code}: ${msg.error.message}`),
+      );
     } else {
       pending.resolve(msg.result);
     }
@@ -177,7 +186,10 @@ export class McpClient {
 
   // ─── JSON-RPC send ────────────────────────────────────────────────────────
 
-  private async sendRequest(method: string, params?: unknown): Promise<unknown> {
+  private async sendRequest(
+    method: string,
+    params?: unknown,
+  ): Promise<unknown> {
     const id = this.nextId++;
     const req: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
     const json = JSON.stringify(req);
@@ -218,8 +230,9 @@ export class McpClient {
         signal: ctrl.signal,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = await res.json() as JsonRpcResponse;
-      if (body.error) throw new Error(`MCP error ${body.error.code}: ${body.error.message}`);
+      const body = (await res.json()) as JsonRpcResponse;
+      if (body.error)
+        throw new Error(`MCP error ${body.error.code}: ${body.error.message}`);
       return body.result;
     } finally {
       clearTimeout(timer);
@@ -229,7 +242,11 @@ export class McpClient {
   private sendNotification(method: string, params?: unknown): void {
     const msg: JsonRpcRequest = { jsonrpc: "2.0", id: null, method, params };
     const json = JSON.stringify(msg);
-    if (this.config.transport.type === "stdio" && this.proc && !this.proc.killed) {
+    if (
+      this.config.transport.type === "stdio" &&
+      this.proc &&
+      !this.proc.killed
+    ) {
       this.proc.stdin.write(`${json}\n`);
     }
     // SSE notifications not needed — server is stateless per-request
@@ -247,27 +264,43 @@ export class McpClient {
   }
 
   private async discoverTools(): Promise<void> {
-    const result = await this.sendRequest("tools/list") as { tools?: unknown[] };
+    const result = (await this.sendRequest("tools/list")) as {
+      tools?: unknown[];
+    };
     const raw = result?.tools ?? [];
     this.tools = raw
-      .filter((t): t is { name: string; description?: string; inputSchema?: unknown } =>
-        typeof t === "object" && t !== null && typeof (t as { name?: unknown }).name === "string",
+      .filter(
+        (
+          t,
+        ): t is { name: string; description?: string; inputSchema?: unknown } =>
+          typeof t === "object" &&
+          t !== null &&
+          typeof (t as { name?: unknown }).name === "string",
       )
       .map((t) => ({
         name: formatMcpToolName(this.config.name, t.name),
         originalName: t.name,
         description: t.description ?? "",
-        inputSchema: (t.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
+        inputSchema: (t.inputSchema as Record<string, unknown>) ?? {
+          type: "object",
+          properties: {},
+        },
       }));
   }
 
   // ─── Tool execution ───────────────────────────────────────────────────────
 
-  async callTool(originalName: string, args: Record<string, unknown>): Promise<string> {
-    const result = await this.sendRequest("tools/call", {
+  async callTool(
+    originalName: string,
+    args: Record<string, unknown>,
+  ): Promise<string> {
+    const result = (await this.sendRequest("tools/call", {
       name: originalName,
       arguments: args,
-    }) as { content?: Array<{ type: string; text?: string }>; isError?: boolean };
+    })) as {
+      content?: Array<{ type: string; text?: string }>;
+      isError?: boolean;
+    };
 
     const content = result?.content ?? [];
     const text = content
@@ -286,7 +319,11 @@ export class McpClient {
   dispose(): void {
     this.rejectAllPending(new Error("MCP client disposed"));
     if (this.proc && !this.proc.killed) {
-      try { this.proc.kill(); } catch { /* ignore */ }
+      try {
+        this.proc.kill();
+      } catch {
+        /* ignore */
+      }
     }
     this.proc = null;
   }

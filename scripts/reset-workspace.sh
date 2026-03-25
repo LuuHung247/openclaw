@@ -141,7 +141,18 @@ mode_fresh() {
 
   echo
   ok "Done. Agent sẽ thấy BOOTSTRAP.md và bắt đầu ritual lần đầu gặp mặt."
-  warn "Restart gateway: systemctl --user restart clawdis-gateway.service"
+
+  section "Restart gateway..."
+  if systemctl --user restart clawdis-gateway.service 2>/dev/null; then
+    sleep 2
+    if systemctl --user is-active --quiet clawdis-gateway.service; then
+      ok "clawdis-gateway.service restarted and active"
+    else
+      warn "clawdis-gateway.service restarted but not active — check: systemctl --user status clawdis-gateway.service"
+    fi
+  else
+    warn "Could not restart clawdis-gateway.service — restart manually"
+  fi
 }
 
 mode_nuke() {

@@ -153,15 +153,8 @@ export function registerCronCli(program: Command) {
       )
       .option("--timeout-seconds <n>", "Timeout seconds for agent jobs")
       .option("--deliver", "Deliver agent output", false)
-      .option(
-        "--channel <channel>",
-        "Delivery channel (last|telegram)",
-        "last",
-      )
-      .option(
-        "--to <dest>",
-        "Delivery destination (Telegram chatId)",
-      )
+      .option("--channel <channel>", "Delivery channel (last|telegram)", "last")
+      .option("--to <dest>", "Delivery destination (Telegram chatId)")
       .option(
         "--best-effort-deliver",
         "Do not fail the job if delivery fails",
@@ -412,14 +405,8 @@ export function registerCronCli(program: Command) {
       .option("--thinking <level>", "Thinking level for agent jobs")
       .option("--timeout-seconds <n>", "Timeout seconds for agent jobs")
       .option("--deliver", "Deliver agent output", false)
-      .option(
-        "--channel <channel>",
-        "Delivery channel (last|telegram)",
-      )
-      .option(
-        "--to <dest>",
-        "Delivery destination (Telegram chatId)",
-      )
+      .option("--channel <channel>", "Delivery channel (last|telegram)")
+      .option("--to <dest>", "Delivery destination (Telegram chatId)")
       .option(
         "--best-effort-deliver",
         "Do not fail job if delivery fails",

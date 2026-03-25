@@ -66,6 +66,14 @@ function chatPage() {
     modelPickerList: [],
     modelPickerFilter: '',
     modelPickerIdx: 0,
+    // Model switcher (footer dropdown)
+    showModelSwitcher: false,
+    modelSwitcherFilter: '',
+    modelSwitcherProviderFilter: '',
+    modelSwitcherIdx: 0,
+    modelSwitching: false,
+    _modelCache: null,
+    _modelCacheTime: 0,
     slashCommands: [
       { cmd: '/help', desc: 'Show available commands' },
       { cmd: '/agents', desc: 'Switch to Agents page' },
@@ -116,6 +124,45 @@ function chatPage() {
       }
     },
 
+    // Model switcher computed
+    get modelDisplayName() {
+      if (!this.currentAgent) return '';
+      var name = this.currentAgent.model_name || '';
+      var short = name.replace(/-\d{8}$/, '');
+      return short.length > 24 ? short.substring(0, 22) + '\u2026' : short;
+    },
+    get switcherProviders() {
+      var seen = {};
+      (this._modelCache || []).forEach(function(m) { seen[m.provider] = true; });
+      return Object.keys(seen).sort();
+    },
+    get filteredSwitcherModels() {
+      var models = this._modelCache || [];
+      var provFilter = this.modelSwitcherProviderFilter;
+      var textFilter = this.modelSwitcherFilter ? this.modelSwitcherFilter.toLowerCase() : '';
+      if (!provFilter && !textFilter) return models;
+      return models.filter(function(m) {
+        if (provFilter && m.provider !== provFilter) return false;
+        if (textFilter) {
+          return m.id.toLowerCase().indexOf(textFilter) !== -1 ||
+                 (m.display_name || '').toLowerCase().indexOf(textFilter) !== -1 ||
+                 m.provider.toLowerCase().indexOf(textFilter) !== -1;
+        }
+        return true;
+      });
+    },
+    get groupedSwitcherModels() {
+      var filtered = this.filteredSwitcherModels;
+      var groups = {}, order = [];
+      filtered.forEach(function(m) {
+        if (!groups[m.provider]) { groups[m.provider] = []; order.push(m.provider); }
+        groups[m.provider].push(m);
+      });
+      return order.map(function(p) {
+        return { provider: p.charAt(0).toUpperCase() + p.slice(1), models: groups[p] };
+      });
+    },
+
     init() {
       var self = this;
 
@@ -131,6 +178,11 @@ function chatPage() {
           e.preventDefault();
           var input = document.getElementById('msg-input');
           if (input) { input.focus(); self.inputText = '/'; }
+        }
+        // Ctrl+M for model switcher
+        if ((e.ctrlKey || e.metaKey) && e.key === 'm' && self.currentAgent) {
+          e.preventDefault();
+          self.toggleModelSwitcher();
         }
         // Ctrl+F for chat search
         if ((e.ctrlKey || e.metaKey) && e.key === 'f' && self.currentAgent) {
@@ -157,21 +209,17 @@ function chatPage() {
         self.autoLoadAgent();
       }
 
-      // Listen for model changes from Settings page — re-fetch from gateway (source of truth)
-      window.addEventListener('openclaw:model-changed', function() {
-        OpenFangAPI.getStatus().then(function(s) {
-          var model = s.default_model || '';
-          if (!model || model === '?') return;
-          if (self.currentAgent) {
-            self.currentAgent.model = model;
-            self.currentAgent.model_provider = '';
-            self.currentAgent.model_name = parseModelName(model);
-          }
-          // Notify user in chat that model changed; suggest /new if they want a fresh context
-          var displayModel = parseModelName(model) || model;
-          self.messages.push({ id: ++msgId, role: 'system', text: 'Model switched to **' + displayModel + '**. Use `/new` to start a fresh session with this model.', meta: '', tools: [] });
-          self.scrollToBottom();
-        }).catch(function() {});
+      // Listen for model changes from Settings page — chỉ thông báo, KHÔNG đổi model session
+      window.addEventListener('openclaw:model-changed', function(e) {
+        var newDefault = (e.detail && e.detail.model) || '';
+        if (!newDefault) return;
+        var displayModel = parseModelName(newDefault) || newDefault;
+        self.messages.push({
+          id: ++msgId, role: 'system',
+          text: 'Default model changed to **' + displayModel + '**. Your current session keeps its model. Use `/model ' + newDefault + '` to switch this session.',
+          meta: '', tools: []
+        });
+        self.scrollToBottom();
       });
 
       // Watch for future pending agent selections (e.g., user clicks agent while on chat)
@@ -221,6 +269,72 @@ function chatPage() {
       this.showModelPicker = false;
       this.inputText = '/model ' + modelId;
       this.sendMessage();
+    },
+
+    // Push a model-switch divider message into chat history (client-only, not persisted)
+    pushModelSwitchMessage: function(modelId, provider) {
+      var displayName = parseModelName(modelId) || modelId;
+      var label = provider ? displayName + ' (' + provider + ')' : displayName;
+      this.messages.push({
+        id: ++msgId, role: 'model-switch',
+        text: 'Set model to ' + label,
+        meta: '', tools: []
+      });
+      this.scrollToBottom();
+    },
+
+    toggleModelSwitcher: function() {
+      if (this.showModelSwitcher) { this.showModelSwitcher = false; return; }
+      var self = this;
+      var now = Date.now();
+      if (this._modelCache && (now - this._modelCacheTime) < 300000) {
+        this.modelSwitcherFilter = '';
+        this.modelSwitcherProviderFilter = '';
+        this.modelSwitcherIdx = 0;
+        this.showModelSwitcher = true;
+        this.$nextTick(function() {
+          var el = document.getElementById('model-switcher-search') || document.getElementById('model-switcher-search-2');
+          if (el) el.focus();
+        });
+        return;
+      }
+      OpenFangAPI.get('/api/models').then(function(data) {
+        var models = (data.models || []).filter(function(m) { return m.available; });
+        self._modelCache = models;
+        self._modelCacheTime = Date.now();
+        self.modelPickerList = models;
+        self.modelSwitcherFilter = '';
+        self.modelSwitcherProviderFilter = '';
+        self.modelSwitcherIdx = 0;
+        self.showModelSwitcher = true;
+        self.$nextTick(function() {
+          var el = document.getElementById('model-switcher-search') || document.getElementById('model-switcher-search-2');
+          if (el) el.focus();
+        });
+      }).catch(function(e) {
+        OpenFangToast.error('Failed to load models: ' + e.message);
+      });
+    },
+
+    switchModel: function(model) {
+      if (!this.currentAgent) return;
+      if (model.id === this.currentAgent.model_name) { this.showModelSwitcher = false; return; }
+      var self = this;
+      this.modelSwitching = true;
+      // Send provider/model format so backend knows which provider to use
+      var fullModelId = model.provider ? model.provider + '/' + model.id : model.id;
+      OpenFangAPI.put('/api/agents/' + this.currentAgent.id + '/model', { model: fullModelId }).then(function(resp) {
+        var resolvedProvider = (resp && resp.provider) || model.provider;
+        self.currentAgent.model_name = model.id;
+        self.currentAgent.model = fullModelId;
+        if (resolvedProvider) self.currentAgent.model_provider = resolvedProvider;
+        self.pushModelSwitchMessage(model.id, resolvedProvider);
+        self.showModelSwitcher = false;
+        self.modelSwitching = false;
+      }).catch(function(e) {
+        OpenFangToast.error('Switch failed: ' + e.message);
+        self.modelSwitching = false;
+      });
     },
 
     // Fetch dynamic slash commands from server
@@ -402,30 +516,18 @@ function chatPage() {
         case '/model':
           if (self.currentAgent) {
             if (cmdArgs) {
-              OpenFangAPI.put('/api/agents/' + self.currentAgent.id + '/model', { model: cmdArgs }).then(function() {
-                self.currentAgent.model_name = cmdArgs;
-                self.messages.push({ id: ++msgId, role: 'system', text: 'Model switched to: `' + cmdArgs + '`', meta: '', tools: [] });
-                self.scrollToBottom();
+              OpenFangAPI.put('/api/agents/' + self.currentAgent.id + '/model', { model: cmdArgs }).then(function(resp) {
+                var resolvedModel = (resp && resp.model) || cmdArgs;
+                var resolvedProvider = (resp && resp.provider) || '';
+                self.currentAgent.model = resolvedModel;
+                self.currentAgent.model_name = parseModelName(resolvedModel);
+                self.pushModelSwitchMessage(resolvedModel, resolvedProvider);
               }).catch(function(e) { OpenFangToast.error('Model switch failed: ' + e.message); });
             } else {
-              // Fetch live model from gateway instead of reading stale local state
-              OpenFangAPI.getSessions().then(function(res) {
-                var list = (res && res.sessions) || [];
-                var s = list.find(function(x) { return x.agent_id === self.currentAgent.id || x.session_key === self.currentAgent.id; });
-                var rawModel = (s && s.model) || self.currentAgent.model || '';
-                var model = parseModelName(rawModel) || rawModel || '?';
-                if (rawModel && self.currentAgent) {
-                  self.currentAgent.model = rawModel;
-                  self.currentAgent.model_provider = '';
-                  self.currentAgent.model_name = parseModelName(rawModel);
-                }
-                self.messages.push({ id: ++msgId, role: 'system', text: '**Current Model**\n- Model: `' + model + '`', meta: '', tools: [] });
-                self.scrollToBottom();
-              }).catch(function() {
-                var model = self.currentAgent.model_name || '?';
-                self.messages.push({ id: ++msgId, role: 'system', text: '**Current Model**\n- Model: `' + model + '`', meta: '', tools: [] });
-                self.scrollToBottom();
-              });
+              var model = self.currentAgent.model || '?';
+              var displayModel = parseModelName(model) || model;
+              self.messages.push({ id: ++msgId, role: 'system', text: '**Current Model**: `' + displayModel + '` (`' + model + '`)', meta: '', tools: [] });
+              self.scrollToBottom();
             }
           } else {
             self.messages.push({ id: ++msgId, role: 'system', text: 'No agent selected.', meta: '', tools: [] });

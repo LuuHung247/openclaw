@@ -61,7 +61,7 @@ export async function sendMessageTelegram(
   const token = resolveToken(opts.token);
   const chatId = normalizeChatId(to);
   const bot = opts.api ? null : new Bot(token);
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  // biome-ignore lint/style/noNonNullAssertion: bot is non-null when opts.api is absent (see line above)
   const api = opts.api ?? bot!.api;
   const mediaUrl = opts.mediaUrl?.trim();
 

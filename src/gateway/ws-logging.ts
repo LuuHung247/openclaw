@@ -36,7 +36,7 @@ export function formatForLog(value: unknown): string {
       if (value.message) parts.push(value.message);
       const code =
         "code" in value &&
-          (typeof value.code === "string" || typeof value.code === "number")
+        (typeof value.code === "string" || typeof value.code === "number")
           ? String(value.code)
           : "";
       if (code) parts.push(`code=${code}`);
@@ -96,7 +96,10 @@ function buildRestMeta(
 
 export type WsLogInflightMaps = {
   since: Map<string, number>;
-  compact: Map<string, { ts: number; method?: string; meta?: Record<string, unknown> }>;
+  compact: Map<
+    string,
+    { ts: number; method?: string; meta?: Record<string, unknown> }
+  >;
   optimized: Map<string, number>;
   lastCompactConnId: { value: string | undefined };
 };
@@ -144,11 +147,11 @@ function logWsFullWithMaps(
   const durationMs =
     direction === "out" && kind === "res" && inflightKey
       ? (() => {
-        const startedAt = maps.since.get(inflightKey);
-        if (startedAt === undefined) return undefined;
-        maps.since.delete(inflightKey);
-        return now - startedAt;
-      })()
+          const startedAt = maps.since.get(inflightKey);
+          if (startedAt === undefined) return undefined;
+          maps.since.delete(inflightKey);
+          return now - startedAt;
+        })()
       : undefined;
 
   const dirArrow = direction === "in" ? "←" : "→";
@@ -162,7 +165,9 @@ function logWsFullWithMaps(
         : undefined;
   const statusToken =
     kind === "res" && ok !== undefined
-      ? ok ? chalk.greenBright("✓") : chalk.redBright("✗")
+      ? ok
+        ? chalk.greenBright("✓")
+        : chalk.redBright("✗")
       : undefined;
   const durationToken =
     typeof durationMs === "number" ? chalk.dim(`${durationMs}ms`) : undefined;
@@ -172,7 +177,8 @@ function logWsFullWithMaps(
     : [];
 
   const trailing: string[] = [];
-  if (connId) trailing.push(`${chalk.dim("conn")}=${chalk.gray(shortId(connId))}`);
+  if (connId)
+    trailing.push(`${chalk.dim("conn")}=${chalk.gray(shortId(connId))}`);
   if (id) trailing.push(`${chalk.dim("id")}=${chalk.gray(shortId(id))}`);
 
   console.log(
@@ -222,7 +228,8 @@ function logWsOptimizedWithMaps(
 
   const startedAt = inflightKey ? maps.optimized.get(inflightKey) : undefined;
   if (inflightKey) maps.optimized.delete(inflightKey);
-  const durationMs = typeof startedAt === "number" ? Date.now() - startedAt : undefined;
+  const durationMs =
+    typeof startedAt === "number" ? Date.now() - startedAt : undefined;
 
   const shouldLog =
     ok === false ||
@@ -230,7 +237,11 @@ function logWsOptimizedWithMaps(
   if (!shouldLog) return;
 
   const statusToken =
-    ok === undefined ? undefined : ok ? chalk.greenBright("✓") : chalk.redBright("✗");
+    ok === undefined
+      ? undefined
+      : ok
+        ? chalk.greenBright("✓")
+        : chalk.redBright("✗");
   const durationToken =
     typeof durationMs === "number" ? chalk.dim(`${durationMs}ms`) : undefined;
 
@@ -245,7 +256,9 @@ function logWsOptimizedWithMaps(
       method ? chalk.bold(method) : undefined,
       durationToken,
       ...restMeta,
-      connId ? `${chalk.dim("conn")}=${chalk.gray(shortId(connId))}` : undefined,
+      connId
+        ? `${chalk.dim("conn")}=${chalk.gray(shortId(connId))}`
+        : undefined,
       id ? `${chalk.dim("id")}=${chalk.gray(shortId(id))}` : undefined,
     ]
       .filter((t): t is string => Boolean(t))
@@ -285,7 +298,9 @@ function logWsCompactWithMaps(
   const prefix = `${chalk.gray("[gws]")} ${arrowColor(compactArrow)} ${chalk.bold(kind)}`;
   const statusToken =
     kind === "res" && ok !== undefined
-      ? ok ? chalk.greenBright("✓") : chalk.redBright("✗")
+      ? ok
+        ? chalk.greenBright("✓")
+        : chalk.redBright("✗")
       : undefined;
 
   const startedAt =
@@ -296,7 +311,9 @@ function logWsCompactWithMaps(
     maps.compact.delete(inflightKey);
   }
   const durationToken =
-    typeof startedAt === "number" ? chalk.dim(`${now - startedAt}ms`) : undefined;
+    typeof startedAt === "number"
+      ? chalk.dim(`${now - startedAt}ms`)
+      : undefined;
 
   const headline =
     (kind === "req" || kind === "res") && method

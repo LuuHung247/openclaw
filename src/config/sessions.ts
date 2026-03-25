@@ -28,7 +28,9 @@ export type SessionEntry = {
   chatType?: SessionChatType;
   thinkingLevel?: string;
   verboseLevel?: string;
+  /** @deprecated — dùng model field thay thế */
   providerOverride?: string;
+  /** @deprecated — dùng model field thay thế */
   modelOverride?: string;
   groupActivation?: "mention" | "always";
   groupActivationNeedsSystemIntro?: boolean;
@@ -53,11 +55,7 @@ export type SessionEntry = {
   subject?: string;
   room?: string;
   space?: string;
-  lastChannel?:
-    | "whatsapp"
-    | "telegram"
-    | "discord"
-    | "webchat";
+  lastChannel?: "whatsapp" | "telegram" | "discord" | "webchat";
   lastTo?: string;
   skillsSnapshot?: SessionSkillSnapshot;
 };
@@ -314,13 +312,17 @@ export async function updateLastRoute(params: {
     abortedLastRun: existing?.abortedLastRun,
     thinkingLevel: existing?.thinkingLevel,
     verboseLevel: existing?.verboseLevel,
-    providerOverride: existing?.providerOverride,
-    modelOverride: existing?.modelOverride,
+    // Preserve model field. Deprecated providerOverride/modelOverride are not copied.
+    model:
+      existing?.model ??
+      (existing?.providerOverride && existing?.modelOverride
+        ? `${existing.providerOverride}/${existing.modelOverride}`
+        : existing?.modelOverride) ??
+      undefined,
     queueMode: existing?.queueMode,
     inputTokens: existing?.inputTokens,
     outputTokens: existing?.outputTokens,
     totalTokens: existing?.totalTokens,
-    model: existing?.model,
     contextTokens: existing?.contextTokens,
     displayName: existing?.displayName,
     chatType: existing?.chatType,

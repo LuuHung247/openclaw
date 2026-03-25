@@ -77,7 +77,7 @@ export function subscribeEmbeddedPiSession(params: {
   const toolMetaById = new Map<string, string | undefined>();
   const blockReplyBreak = params.blockReplyBreak ?? "text_end";
   let deltaBuffer = "";
-  let cumulativeAssistantText = "";
+  let _cumulativeAssistantText = "";
   let lastStreamedAssistant: string | undefined;
   let lastBlockReplyText: string | undefined;
   let assistantTextBaseline = 0;
@@ -153,7 +153,7 @@ export function subscribeEmbeddedPiSession(params: {
     toolMetas.length = 0;
     toolMetaById.clear();
     deltaBuffer = "";
-    cumulativeAssistantText = "";
+    _cumulativeAssistantText = "";
     lastStreamedAssistant = undefined;
     lastBlockReplyText = undefined;
     assistantTextBaseline = 0;
@@ -384,7 +384,7 @@ export function subscribeEmbeddedPiSession(params: {
             }
           }
           deltaBuffer = "";
-          cumulativeAssistantText = "";
+          _cumulativeAssistantText = "";
           lastStreamedAssistant = undefined;
           lastBlockReplyText = undefined;
         }

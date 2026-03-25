@@ -7,15 +7,11 @@
  * - Respond with result or error
  */
 
-import type { HandsRegistry, HandsRunner } from "../../hands/index.js";
-import type { HandRequirementCheck } from "../../hands/types.js";
-import { checkRequirements } from "../../hands/requirements.js";
 import type { CronService } from "../../cron/service.js";
-import {
-  ErrorCodes,
-  errorShape,
-  formatValidationErrors,
-} from "../protocol/index.js";
+import type { HandsRegistry, HandsRunner } from "../../hands/index.js";
+import { checkRequirements } from "../../hands/requirements.js";
+import type { HandRequirementCheck } from "../../hands/types.js";
+import { ErrorCodes, errorShape } from "../protocol/index.js";
 
 type RespondFn = (
   ok: boolean,
@@ -33,7 +29,7 @@ type HandsDeps = {
  * List all available hand definitions
  */
 export async function handleHandsList(
-  params: Record<string, unknown>,
+  _params: Record<string, unknown>,
   deps: HandsDeps,
   respond: RespondFn,
 ): Promise<void> {
@@ -138,11 +134,7 @@ export async function handleHandsActivate(
       undefined,
     );
   } catch (err) {
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.UNAVAILABLE, String(err)),
-    );
+    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
   }
 }
 
@@ -172,11 +164,7 @@ export async function handleHandsDeactivate(
     await deps.runner.deactivateHand(instanceId);
     respond(true, { ok: true }, undefined);
   } catch (err) {
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.UNAVAILABLE, String(err)),
-    );
+    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
   }
 }
 
@@ -206,11 +194,7 @@ export async function handleHandsPause(
     await deps.runner.pauseHand(instanceId);
     respond(true, { ok: true }, undefined);
   } catch (err) {
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.UNAVAILABLE, String(err)),
-    );
+    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
   }
 }
 
@@ -240,11 +224,7 @@ export async function handleHandsResume(
     await deps.runner.resumeHand(instanceId);
     respond(true, { ok: true }, undefined);
   } catch (err) {
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.UNAVAILABLE, String(err)),
-    );
+    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
   }
 }
 
@@ -252,7 +232,7 @@ export async function handleHandsResume(
  * List all hand instances
  */
 export async function handleHandsInstances(
-  params: Record<string, unknown>,
+  _params: Record<string, unknown>,
   deps: HandsDeps,
   respond: RespondFn,
 ): Promise<void> {
@@ -287,7 +267,10 @@ export async function handleHandsStats(
     respond(
       false,
       undefined,
-      errorShape(ErrorCodes.INVALID_REQUEST, `Instance not found: ${instanceId}`),
+      errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        `Instance not found: ${instanceId}`,
+      ),
     );
     return;
   }
@@ -297,7 +280,10 @@ export async function handleHandsStats(
     respond(
       false,
       undefined,
-      errorShape(ErrorCodes.INVALID_REQUEST, `Hand not found: ${instance.handId}`),
+      errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        `Hand not found: ${instance.handId}`,
+      ),
     );
     return;
   }
@@ -359,7 +345,10 @@ export async function handleHandsUpdateSettings(
     respond(
       false,
       undefined,
-      errorShape(ErrorCodes.INVALID_REQUEST, `Instance not found: ${instanceId}`),
+      errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        `Instance not found: ${instanceId}`,
+      ),
     );
     return;
   }
@@ -373,12 +362,14 @@ export async function handleHandsUpdateSettings(
  * Returns sessions formatted as { value: sessionKey, label: "DisplayName (channel)" }
  */
 export async function handleHandsSessionsOptions(
-  params: Record<string, unknown>,
-  deps: HandsDeps,
+  _params: Record<string, unknown>,
+  _deps: HandsDeps,
   respond: RespondFn,
 ): Promise<void> {
   // Import sessions helper locally to avoid circular dependency
-  const { loadSessionStore, resolveStorePath } = await import("../../config/sessions.js");
+  const { loadSessionStore, resolveStorePath } = await import(
+    "../../config/sessions.js"
+  );
   const { loadConfig } = await import("../../config/config.js");
 
   try {
@@ -400,9 +391,10 @@ export async function handleHandsSessionsOptions(
         const displayName = entry?.displayName ?? key;
         const lastChannel = entry?.lastChannel ?? "unknown";
         // Format: "webui", "webui (telegram)", "lark", etc.
-        const label = lastChannel && lastChannel !== key
-          ? `${displayName} (${lastChannel})`
-          : displayName;
+        const label =
+          lastChannel && lastChannel !== key
+            ? `${displayName} (${lastChannel})`
+            : displayName;
         return {
           value: key,
           label,
@@ -414,7 +406,10 @@ export async function handleHandsSessionsOptions(
     respond(
       false,
       undefined,
-      errorShape(ErrorCodes.UNAVAILABLE, `Failed to load sessions: ${String(err)}`),
+      errorShape(
+        ErrorCodes.UNAVAILABLE,
+        `Failed to load sessions: ${String(err)}`,
+      ),
     );
   }
 }

@@ -1,7 +1,7 @@
-import Database from "better-sqlite3";
-import * as path from "node:path";
-import * as fs from "node:fs";
 import * as crypto from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import Database from "better-sqlite3";
 
 export interface MemoryEntry {
   id: string;
@@ -172,7 +172,9 @@ export class MemorySubstrate {
 
     // Index into FTS5
     this.db
-      .prepare("INSERT INTO memories_fts(id, agent_id, content) VALUES (?, ?, ?)")
+      .prepare(
+        "INSERT INTO memories_fts(id, agent_id, content) VALUES (?, ?, ?)",
+      )
       .run(id, params.agent_id, params.content);
 
     // Fire-and-forget embedding (does not block store())
@@ -265,9 +267,7 @@ export class MemorySubstrate {
 
     // Normalize weights
     const hasVector = vectorMap.size > 0;
-    const w = hasVector
-      ? weights
-      : { bm25: 1.0, vector: 0.0 };
+    const w = hasVector ? weights : { bm25: 1.0, vector: 0.0 };
 
     const scored: HybridSearchResult[] = [];
     for (const id of allIds) {

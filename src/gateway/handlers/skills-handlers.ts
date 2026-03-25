@@ -148,7 +148,10 @@ export async function handleSkillsUninstall(
     respond(
       false,
       undefined,
-      errorShape(ErrorCodes.INVALID_REQUEST, "skills.uninstall requires skillKey parameter"),
+      errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        "skills.uninstall requires skillKey parameter",
+      ),
     );
     return;
   }
@@ -164,7 +167,11 @@ export async function handleSkillsUninstall(
       (s) => s.skillKey === skillKey || s.name === skillKey,
     );
     if (!skillEntry) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Skill "${skillKey}" not found`));
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.UNAVAILABLE, `Skill "${skillKey}" not found`),
+      );
       return;
     }
     if (skillEntry.source === "clawdis-bundled") {
@@ -190,7 +197,10 @@ export async function handleSkillsUninstall(
     respond(
       false,
       undefined,
-      errorShape(ErrorCodes.UNAVAILABLE, `Failed to uninstall skill: ${formatError(err)}`),
+      errorShape(
+        ErrorCodes.UNAVAILABLE,
+        `Failed to uninstall skill: ${formatError(err)}`,
+      ),
     );
   }
 }
@@ -202,19 +212,31 @@ export async function handleSkillsClawHubInstall(
 ): Promise<void> {
   const slug = typeof params.slug === "string" ? params.slug.trim() : "";
   if (!slug) {
-    respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "slug required"));
+    respond(
+      false,
+      undefined,
+      errorShape(ErrorCodes.INVALID_REQUEST, "slug required"),
+    );
     return;
   }
   try {
     const skillMdUrl = `https://clawhub.ai/api/v1/skills/${encodeURIComponent(slug)}/file?path=SKILL.md`;
     const res = await fetch(skillMdUrl);
     if (!res.ok) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `ClawHub returned ${res.status}`));
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.UNAVAILABLE, `ClawHub returned ${res.status}`),
+      );
       return;
     }
     const skillMd = await res.text();
     if (!skillMd.trim()) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "Empty SKILL.md from ClawHub"));
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.UNAVAILABLE, "Empty SKILL.md from ClawHub"),
+      );
       return;
     }
     const skillDir = path.join(CONFIG_DIR, "skills", slug);
@@ -223,6 +245,10 @@ export async function handleSkillsClawHubInstall(
     broadcast("skills.installed", { name: slug });
     respond(true, { ok: true, name: slug }, undefined);
   } catch (err) {
-    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Install failed: ${formatError(err)}`));
+    respond(
+      false,
+      undefined,
+      errorShape(ErrorCodes.UNAVAILABLE, `Install failed: ${formatError(err)}`),
+    );
   }
 }

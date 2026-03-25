@@ -834,8 +834,6 @@ export async function getReplyFromConfig(
 
   let persistedThinking: string | undefined;
   let persistedVerbose: string | undefined;
-  let persistedModelOverride: string | undefined;
-  let persistedProviderOverride: string | undefined;
 
   const groupResolution = resolveGroupSessionKey(ctx);
   const isGroup =
@@ -889,8 +887,8 @@ export async function getReplyFromConfig(
     abortedLastRun = entry.abortedLastRun ?? false;
     persistedThinking = entry.thinkingLevel;
     persistedVerbose = entry.verboseLevel;
-    persistedModelOverride = entry.modelOverride;
-    persistedProviderOverride = entry.providerOverride;
+    // NOTE: model is now in entry.model (format: "provider/model")
+    // Legacy modelOverride/providerOverride are consumed below for backward compat
   } else {
     sessionId = crypto.randomUUID();
     isNewSession = true;
@@ -908,8 +906,16 @@ export async function getReplyFromConfig(
     // Persist previously stored thinking/verbose levels when present.
     thinkingLevel: persistedThinking ?? baseEntry?.thinkingLevel,
     verboseLevel: persistedVerbose ?? baseEntry?.verboseLevel,
-    modelOverride: persistedModelOverride ?? baseEntry?.modelOverride,
-    providerOverride: persistedProviderOverride ?? baseEntry?.providerOverride,
+    // Model: preserve from base entry. model field > legacy fields
+    model:
+      baseEntry?.model ??
+      (baseEntry?.providerOverride && baseEntry?.modelOverride
+        ? `${baseEntry.providerOverride}/${baseEntry.modelOverride}`
+        : baseEntry?.modelOverride) ??
+      undefined,
+    // Don't copy deprecated fields — they're consumed above into model
+    modelOverride: undefined,
+    providerOverride: undefined,
     queueMode: baseEntry?.queueMode,
     queueDebounceMs: baseEntry?.queueDebounceMs,
     queueCap: baseEntry?.queueCap,
@@ -1083,11 +1089,12 @@ export async function getReplyFromConfig(
   };
 
   const hasAllowlist = (agentCfg?.allowedModels?.length ?? 0) > 0;
-  const hasStoredOverride = Boolean(
-    sessionEntry?.modelOverride || sessionEntry?.providerOverride,
+  const hasStoredModel = Boolean(
+    sessionEntry?.model ||
+      sessionEntry?.modelOverride ||
+      sessionEntry?.providerOverride,
   );
-  const needsModelCatalog =
-    hasModelDirective || hasAllowlist || hasStoredOverride;
+  const needsModelCatalog = hasModelDirective || hasAllowlist || hasStoredModel;
   let allowedModelKeys = new Set<string>();
   let allowedModelCatalog: Awaited<ReturnType<typeof loadModelCatalog>> = [];
   let resetModelOverride = false;
@@ -1103,31 +1110,63 @@ export async function getReplyFromConfig(
     allowedModelKeys = allowed.allowedKeys;
   }
 
-  if (sessionEntry && sessionStore && sessionKey && hasStoredOverride) {
-    const overrideProvider =
-      sessionEntry.providerOverride?.trim() || defaultProvider;
-    const overrideModel = sessionEntry.modelOverride?.trim();
-    if (overrideModel) {
-      const key = modelKey(overrideProvider, overrideModel);
-      if (allowedModelKeys.size > 0 && !allowedModelKeys.has(key)) {
-        delete sessionEntry.providerOverride;
-        delete sessionEntry.modelOverride;
-        sessionEntry.updatedAt = Date.now();
-        sessionStore[sessionKey] = sessionEntry;
-        await saveSessionStore(storePath, sessionStore);
-        resetModelOverride = true;
-      }
+  // Resolve stored model: model field > legacy override fields
+  const storedModel =
+    sessionEntry?.model?.trim() ||
+    (sessionEntry?.providerOverride && sessionEntry?.modelOverride
+      ? `${sessionEntry.providerOverride}/${sessionEntry.modelOverride}`
+      : sessionEntry?.modelOverride?.trim());
+
+  if (sessionEntry && sessionStore && sessionKey && storedModel) {
+    // Validate against allowlist
+    const parts = storedModel.split("/");
+    const candidateProvider = parts.length >= 2 ? parts[0] : defaultProvider;
+    const candidateModel =
+      parts.length >= 2 ? parts.slice(1).join("/") : storedModel;
+    const key = modelKey(candidateProvider, candidateModel);
+    if (allowedModelKeys.size > 0 && !allowedModelKeys.has(key)) {
+      delete sessionEntry.model;
+      delete sessionEntry.providerOverride;
+      delete sessionEntry.modelOverride;
+      sessionEntry.updatedAt = Date.now();
+      sessionStore[sessionKey] = sessionEntry;
+      await saveSessionStore(storePath, sessionStore);
+      resetModelOverride = true;
     }
   }
 
-  const storedProviderOverride = sessionEntry?.providerOverride?.trim();
-  const storedModelOverride = sessionEntry?.modelOverride?.trim();
-  if (storedModelOverride) {
-    const candidateProvider = storedProviderOverride || defaultProvider;
-    const key = modelKey(candidateProvider, storedModelOverride);
-    if (allowedModelKeys.size === 0 || allowedModelKeys.has(key)) {
-      provider = candidateProvider;
-      model = storedModelOverride;
+  if (storedModel && !resetModelOverride) {
+    const parts = storedModel.split("/");
+    if (parts.length >= 2) {
+      const candidateProvider = parts[0];
+      const candidateModel = parts.slice(1).join("/");
+      const key = modelKey(candidateProvider, candidateModel);
+      if (allowedModelKeys.size === 0 || allowedModelKeys.has(key)) {
+        provider = candidateProvider;
+        model = candidateModel;
+      }
+    } else {
+      // Bare model ID — lookup provider from config (same logic as sessions.patch handler)
+      const providers = cfg.models?.providers ?? {};
+      let resolvedProvider = defaultProvider;
+      for (const [provId, provCfg] of Object.entries(providers)) {
+        const models = (provCfg as { models?: { id: string }[] }).models;
+        if (models?.some((m: { id: string }) => m.id === storedModel)) {
+          resolvedProvider = provId;
+          break;
+        }
+      }
+      const key = modelKey(resolvedProvider, storedModel);
+      if (allowedModelKeys.size === 0 || allowedModelKeys.has(key)) {
+        provider = resolvedProvider;
+        model = storedModel;
+        // Normalize stored value to include provider prefix
+        if (sessionEntry && sessionStore && sessionKey) {
+          sessionEntry.model = `${resolvedProvider}/${storedModel}`;
+          sessionStore[sessionKey] = sessionEntry;
+          await saveSessionStore(storePath, sessionStore);
+        }
+      }
     }
   }
   contextTokens =
@@ -1300,12 +1339,13 @@ export async function getReplyFromConfig(
       }
       if (modelSelection) {
         if (modelSelection.isDefault) {
-          delete sessionEntry.providerOverride;
-          delete sessionEntry.modelOverride;
+          delete sessionEntry.model;
         } else {
-          sessionEntry.providerOverride = modelSelection.provider;
-          sessionEntry.modelOverride = modelSelection.model;
+          sessionEntry.model = `${modelSelection.provider}/${modelSelection.model}`;
         }
+        // Cleanup deprecated fields
+        delete sessionEntry.modelOverride;
+        delete sessionEntry.providerOverride;
       }
       if (hasQueueDirective && inlineQueueReset) {
         delete sessionEntry.queueMode;
@@ -1408,12 +1448,13 @@ export async function getReplyFromConfig(
             resolved.ref.provider === defaultProvider &&
             resolved.ref.model === defaultModel;
           if (isDefault) {
-            delete sessionEntry.providerOverride;
-            delete sessionEntry.modelOverride;
+            delete sessionEntry.model;
           } else {
-            sessionEntry.providerOverride = resolved.ref.provider;
-            sessionEntry.modelOverride = resolved.ref.model;
+            sessionEntry.model = `${resolved.ref.provider}/${resolved.ref.model}`;
           }
+          // Cleanup deprecated fields
+          delete sessionEntry.providerOverride;
+          delete sessionEntry.modelOverride;
           provider = resolved.ref.provider;
           model = resolved.ref.model;
           const nextLabel = `${provider}/${model}`;
@@ -1987,10 +2028,14 @@ export async function getReplyFromConfig(
 
     if (sessionStore && sessionKey) {
       const usage = runResult.meta.agentMeta?.usage;
-      const modelUsed = runResult.meta.agentMeta?.model ?? defaultModel;
+      const rawModelUsed = runResult.meta.agentMeta?.model ?? defaultModel;
+      const providerUsed = runResult.meta.agentMeta?.provider ?? provider;
+      const modelUsed = rawModelUsed.includes("/")
+        ? rawModelUsed
+        : `${providerUsed}/${rawModelUsed}`;
       const contextTokensUsed =
         agentCfg?.contextTokens ??
-        lookupContextTokens(modelUsed) ??
+        lookupContextTokens(rawModelUsed) ??
         sessionEntry?.contextTokens ??
         DEFAULT_CONTEXT_TOKENS;
 
@@ -2246,10 +2291,14 @@ export async function getReplyFromConfig(
 
     if (sessionStore && sessionKey) {
       const usage = runResult.meta.agentMeta?.usage;
-      const modelUsed = runResult.meta.agentMeta?.model ?? defaultModel;
+      const rawModelUsed2 = runResult.meta.agentMeta?.model ?? defaultModel;
+      const providerUsed2 = runResult.meta.agentMeta?.provider ?? provider;
+      const modelUsed2 = rawModelUsed2.includes("/")
+        ? rawModelUsed2
+        : `${providerUsed2}/${rawModelUsed2}`;
       const contextTokensUsed =
         agentCfg?.contextTokens ??
-        lookupContextTokens(modelUsed) ??
+        lookupContextTokens(rawModelUsed2) ??
         sessionEntry?.contextTokens ??
         DEFAULT_CONTEXT_TOKENS;
 
@@ -2266,19 +2315,19 @@ export async function getReplyFromConfig(
             outputTokens: output,
             totalTokens:
               promptTokens > 0 ? promptTokens : (usage.total ?? input),
-            model: modelUsed,
+            model: modelUsed2,
             contextTokens: contextTokensUsed ?? entry.contextTokens,
             updatedAt: Date.now(),
           };
           sessionStore[sessionKey] = sessionEntry;
           await saveSessionStore(storePath, sessionStore);
         }
-      } else if (modelUsed || contextTokensUsed) {
+      } else if (modelUsed2 || contextTokensUsed) {
         const entry = sessionEntry ?? sessionStore[sessionKey];
         if (entry) {
           sessionEntry = {
             ...entry,
-            model: modelUsed ?? entry.model,
+            model: modelUsed2 ?? entry.model,
             contextTokens: contextTokensUsed ?? entry.contextTokens,
           };
           sessionStore[sessionKey] = sessionEntry;

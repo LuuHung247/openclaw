@@ -9,11 +9,11 @@
  */
 
 import crypto from "node:crypto";
-import type { HandDefinition, HandInstance, HandActivationResult } from "./types.js";
-import type { HandsRegistry } from "./registry.js";
 import type { CronService } from "../cron/service.js";
 import type { CronJobCreate } from "../cron/types.js";
+import type { HandsRegistry } from "./registry.js";
 import { checkRequirements } from "./requirements.js";
+import type { HandActivationResult, HandInstance } from "./types.js";
 
 export interface HandsRunnerConfig {
   registry: HandsRegistry;
@@ -79,7 +79,10 @@ export class HandsRunner {
 
     // Create cron jobs if autonomous (max_iterations set)
     const cronJobIds: string[] = [];
-    if (definition.agent.max_iterations && definition.agent.max_iterations > 0) {
+    if (
+      definition.agent.max_iterations &&
+      definition.agent.max_iterations > 0
+    ) {
       const intervalMs = this.parseCheckInterval(
         userConfig.check_interval as string,
       );
@@ -204,10 +207,7 @@ export class HandsRunner {
   /**
    * Send a message to a Hand's session
    */
-  async messageHand(
-    instanceId: string,
-    message: string,
-  ): Promise<void> {
+  async messageHand(instanceId: string, message: string): Promise<void> {
     const instance = this.config.registry.getInstance(instanceId);
     if (!instance) {
       throw new Error(`Instance not found: ${instanceId}`);

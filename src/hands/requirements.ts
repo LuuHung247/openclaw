@@ -8,8 +8,8 @@
  * - File existence
  */
 
-import type { HandDefinition, HandRequirementCheck } from "./types.js";
 import { existsSync } from "node:fs";
+import type { HandDefinition, HandRequirementCheck } from "./types.js";
 
 /**
  * Check if a binary is available on the system
@@ -38,7 +38,7 @@ function checkEnv(envName: string): boolean {
 function checkApiKey(keyName: string): boolean {
   // TODO: Integrate with config system to check for API keys
   // For now, check environment variable as fallback
-  const envVar = keyName.toUpperCase().replace(/[^A-Z0-9]/g, "_") + "_API_KEY";
+  const envVar = `${keyName.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
   return checkEnv(envVar);
 }
 

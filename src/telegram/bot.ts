@@ -15,10 +15,10 @@ import { danger, isVerbose, logVerbose } from "../globals.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { getChildLogger } from "../logging.js";
 import { mediaKindFromMime } from "../media/constants.js";
+import { loadWebMedia } from "../media/fetch.js";
 import { detectMime } from "../media/mime.js";
 import { saveMediaBuffer } from "../media/store.js";
 import type { RuntimeEnv } from "../runtime.js";
-import { loadWebMedia } from "../media/fetch.js";
 import { PARSE_ERR_RE } from "./constants.js";
 
 // Minimal structural type covering the fields used in this module.
@@ -356,8 +356,14 @@ async function deliverReplies(params: {
   replyToMode: ReplyToMode;
   textLimit?: number;
 }) {
-  const { replies, chatId, runtime, bot, replyToMode, textLimit = 4096 } =
-    params;
+  const {
+    replies,
+    chatId,
+    runtime,
+    bot,
+    replyToMode,
+    textLimit = 4096,
+  } = params;
   let hasReplied = false;
   for (const reply of replies) {
     if (!reply?.text && !reply?.mediaUrl && !(reply?.mediaUrls?.length ?? 0)) {
@@ -369,18 +375,26 @@ async function deliverReplies(params: {
         ? undefined
         : resolveTelegramReplyId(reply.replyToId);
     const replyToMessageId =
-      replyToId && (replyToMode === "all" || !hasReplied) ? replyToId : undefined;
+      replyToId && (replyToMode === "all" || !hasReplied)
+        ? replyToId
+        : undefined;
     const mediaList = reply.mediaUrls?.length
       ? reply.mediaUrls
       : reply.mediaUrl
         ? [reply.mediaUrl]
         : [];
     if (mediaList.length === 0) {
-      hasReplied = await deliverTextReply(bot, chatId, reply.text || "", runtime, {
-        replyToMessageId,
-        textLimit,
-        hasReplied,
-      });
+      hasReplied = await deliverTextReply(
+        bot,
+        chatId,
+        reply.text || "",
+        runtime,
+        {
+          replyToMessageId,
+          textLimit,
+          hasReplied,
+        },
+      );
     } else {
       hasReplied = await deliverMediaReply(
         bot,

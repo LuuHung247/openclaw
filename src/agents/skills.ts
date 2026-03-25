@@ -527,7 +527,9 @@ function loadSkillEntries(
         const raw = fs.readFileSync(skill.filePath, "utf-8");
         frontmatter = parseFrontmatter(raw);
       } catch (err) {
-        console.warn(`[skills] failed to load skill "${skill.name}" from ${skill.filePath}: ${String(err)}`);
+        console.warn(
+          `[skills] failed to load skill "${skill.name}" from ${skill.filePath}: ${String(err)}`,
+        );
       }
       return {
         skill,

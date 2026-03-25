@@ -131,9 +131,9 @@ export async function runInteractiveOnboarding(
   const remoteUrl = baseConfig.gateway?.remote?.url?.trim() ?? "";
   const remoteProbe = remoteUrl
     ? await probeGatewayReachable({
-      url: remoteUrl,
-      token: baseConfig.gateway?.remote?.token,
-    })
+        url: remoteUrl,
+        token: baseConfig.gateway?.remote?.token,
+      })
     : null;
 
   const mode =
@@ -254,15 +254,15 @@ export async function runInteractiveOnboarding(
     note(
       isRemote
         ? [
-          "You are running in a remote/VPS environment.",
-          "A URL will be shown for you to open in your LOCAL browser.",
-          "After signing in, copy the redirect URL and paste it back here.",
-        ].join("\n")
+            "You are running in a remote/VPS environment.",
+            "A URL will be shown for you to open in your LOCAL browser.",
+            "After signing in, copy the redirect URL and paste it back here.",
+          ].join("\n")
         : [
-          "Browser will open for Google authentication.",
-          "Sign in with your Google account that has Antigravity access.",
-          "The callback will be captured automatically on localhost:51121.",
-        ].join("\n"),
+            "Browser will open for Google authentication.",
+            "Sign in with your Google account that has Antigravity access.",
+            "The callback will be captured automatically on localhost:51121.",
+          ].join("\n"),
       "Google Antigravity OAuth",
     );
     const spin = spinner();
@@ -511,8 +511,12 @@ export async function runInteractiveOnboarding(
   // Detect Docker environment (systemd không available trong container)
   const isInDocker =
     process.env.container === "docker" ||
-    (await import("node:fs")
-      .then((fs) => fs.promises.access("/.dockerenv").then(() => true).catch(() => false)));
+    (await import("node:fs").then((fs) =>
+      fs.promises
+        .access("/.dockerenv")
+        .then(() => true)
+        .catch(() => false),
+    ));
 
   if (isInDocker) {
     note(

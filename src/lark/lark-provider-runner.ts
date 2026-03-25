@@ -8,8 +8,12 @@
 import { getReplyFromConfig } from "../auto-reply/reply.js";
 import type { ReplyPayload } from "../auto-reply/types.js";
 import { loadConfig } from "../config/config.js";
-import { parseLarkConfig, getLarkProvider, resetLarkProvider } from "./provider.js";
 import type { LarkProvider } from "./provider.js";
+import {
+  getLarkProvider,
+  parseLarkConfig,
+  resetLarkProvider,
+} from "./provider.js";
 
 /** Start Lark provider and route messages to agent */
 export async function startLarkProvider(): Promise<LarkProvider> {
@@ -17,7 +21,9 @@ export async function startLarkProvider(): Promise<LarkProvider> {
   const larkCfg = parseLarkConfig(cfg);
 
   if (!larkCfg) {
-    throw new Error("Lark config missing or invalid (appId + appSecret required)");
+    throw new Error(
+      "Lark config missing or invalid (appId + appSecret required)",
+    );
   }
 
   const provider = getLarkProvider(larkCfg, async (data) => {
@@ -29,7 +35,9 @@ export async function startLarkProvider(): Promise<LarkProvider> {
       return;
     }
 
-    console.info(`[lark] inbound: from=${senderId} chat=${chatId} text="${text.slice(0, 80)}"`);
+    console.info(
+      `[lark] inbound: from=${senderId} chat=${chatId} text="${text.slice(0, 80)}"`,
+    );
 
     const ctx = {
       Body: text,
@@ -56,7 +64,9 @@ export async function startLarkProvider(): Promise<LarkProvider> {
 
     let replyResult: ReplyPayload | ReplyPayload[] | undefined;
     try {
-      replyResult = await getReplyFromConfig(ctx, { onBlockReply: sendBlockReply });
+      replyResult = await getReplyFromConfig(ctx, {
+        onBlockReply: sendBlockReply,
+      });
     } catch (err) {
       console.error("[lark] getReplyFromConfig error:", err);
       return;

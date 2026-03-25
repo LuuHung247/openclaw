@@ -54,9 +54,7 @@ function pickSummaryFromPayloads(
 function resolveDeliveryTarget(
   cfg: ClawdisConfig,
   jobPayload: {
-    channel?:
-      | "last"
-      | "telegram";
+    channel?: "last" | "telegram";
     to?: string;
   },
 ) {
@@ -77,9 +75,7 @@ function resolveDeliveryTarget(
       ? main.lastChannel
       : undefined;
   const lastChannel =
-    lastChannelRaw === "telegram"
-      ? lastChannelRaw
-      : undefined;
+    lastChannelRaw === "telegram" ? lastChannelRaw : undefined;
   const lastTo = typeof main?.lastTo === "string" ? main.lastTo.trim() : "";
 
   const channel = (() => {

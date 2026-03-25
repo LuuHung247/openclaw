@@ -20,13 +20,17 @@
  */
 
 import crypto from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import JSON5 from "json5";
 
 export type TriggerPattern =
   | { kind: "cron_finished"; jobId?: string; status?: "ok" | "error" }
-  | { kind: "hand_event"; handId?: string; event?: "activated" | "deactivated" | "paused" | "resumed" | "error" }
+  | {
+      kind: "hand_event";
+      handId?: string;
+      event?: "activated" | "deactivated" | "paused" | "resumed" | "error";
+    }
   | { kind: "content_match"; substring: string; sessionKey?: string }
   | { kind: "webhook"; path: string }
   | { kind: "file_change"; glob: string };
@@ -67,7 +71,10 @@ export interface TriggerEngineConfig {
   triggersDir?: string;
   triggersFile?: string;
   firesFile?: string;
-  runAction: (action: TriggerAction, eventData: Record<string, unknown>) => Promise<{ ok: boolean; result?: string; error?: string }>;
+  runAction: (
+    action: TriggerAction,
+    eventData: Record<string, unknown>,
+  ) => Promise<{ ok: boolean; result?: string; error?: string }>;
   emitEvent?: (event: string, payload: unknown) => void;
 }
 
@@ -84,7 +91,9 @@ export class TriggerEngine {
       triggersDir: config?.triggersDir ?? TRIGGERS_DIR,
       triggersFile: config?.triggersFile ?? TRIGGERS_FILE,
       firesFile: config?.firesFile ?? FIRES_FILE,
-      runAction: config?.runAction ?? (async () => ({ ok: false, error: "Not implemented" })),
+      runAction:
+        config?.runAction ??
+        (async () => ({ ok: false, error: "Not implemented" })),
       emitEvent: config?.emitEvent ?? (() => {}),
     };
   }
@@ -165,7 +174,7 @@ export class TriggerEngine {
         mkdirSync(dir, { recursive: true });
       }
 
-      const line = JSON.stringify(fire) + "\n";
+      const line = `${JSON.stringify(fire)}\n`;
       const { appendFileSync } = require("node:fs");
       appendFileSync(firesFile, line);
     } catch (err) {
@@ -183,7 +192,9 @@ export class TriggerEngine {
     return all.filter((t) => t.enabled);
   }
 
-  async createTrigger(def: Omit<TriggerDefinition, "id" | "createdAtMs" | "updatedAtMs">): Promise<TriggerDefinition> {
+  async createTrigger(
+    def: Omit<TriggerDefinition, "id" | "createdAtMs" | "updatedAtMs">,
+  ): Promise<TriggerDefinition> {
     const id = crypto.randomUUID();
     const now = Date.now();
     const trigger: TriggerDefinition = {
@@ -197,7 +208,10 @@ export class TriggerEngine {
     return trigger;
   }
 
-  async updateTrigger(id: string, updates: Partial<Omit<TriggerDefinition, "id" | "createdAtMs">>): Promise<TriggerDefinition | undefined> {
+  async updateTrigger(
+    id: string,
+    updates: Partial<Omit<TriggerDefinition, "id" | "createdAtMs">>,
+  ): Promise<TriggerDefinition | undefined> {
     const trigger = this.triggers.get(id);
     if (!trigger) return undefined;
 
@@ -221,7 +235,9 @@ export class TriggerEngine {
   }
 
   listFires(triggerId?: string, limit = 100): TriggerFire[] {
-    const all = Array.from(this.fires.values()).sort((a, b) => b.firedAt - a.firedAt);
+    const all = Array.from(this.fires.values()).sort(
+      (a, b) => b.firedAt - a.firedAt,
+    );
     if (triggerId) {
       return all.filter((f) => f.triggerId === triggerId).slice(0, limit);
     }
@@ -231,7 +247,10 @@ export class TriggerEngine {
   /**
    * Evaluate an event against all triggers and fire matching ones
    */
-  async evaluateEvent(event: string, eventData: Record<string, unknown>): Promise<void> {
+  async evaluateEvent(
+    event: string,
+    eventData: Record<string, unknown>,
+  ): Promise<void> {
     const enabledTriggers = this.listTriggers(false);
 
     for (const trigger of enabledTriggers) {
@@ -244,7 +263,11 @@ export class TriggerEngine {
   /**
    * Check if a trigger pattern matches an event
    */
-  private matchesPattern(pattern: TriggerPattern, event: string, eventData: Record<string, unknown>): boolean {
+  private matchesPattern(
+    pattern: TriggerPattern,
+    event: string,
+    eventData: Record<string, unknown>,
+  ): boolean {
     switch (pattern.kind) {
       case "cron_finished":
         if (event !== "cron.finished") return false;
@@ -258,25 +281,28 @@ export class TriggerEngine {
         if (pattern.event && eventData.event !== pattern.event) return false;
         return true;
 
-      case "content_match":
+      case "content_match": {
         if (event !== "agent.message" && event !== "agent.done") return false;
         const content = String(eventData.content || eventData.message || "");
         if (!content.includes(pattern.substring)) return false;
-        if (pattern.sessionKey && eventData.sessionKey !== pattern.sessionKey) return false;
+        if (pattern.sessionKey && eventData.sessionKey !== pattern.sessionKey)
+          return false;
         return true;
+      }
 
       case "webhook":
         if (event !== "webhook.received") return false;
         if (eventData.path !== pattern.path) return false;
         return true;
 
-      case "file_change":
+      case "file_change": {
         if (event !== "file.changed") return false;
         // Simple glob matching
         const filePath = String(eventData.path || "");
         const glob = pattern.glob.replace("*", ".*");
         const regex = new RegExp(glob);
         return regex.test(filePath);
+      }
 
       default:
         return false;
@@ -286,7 +312,10 @@ export class TriggerEngine {
   /**
    * Fire a trigger (execute its action)
    */
-  async fireTrigger(triggerId: string, eventData: Record<string, unknown>): Promise<TriggerFire | null> {
+  async fireTrigger(
+    triggerId: string,
+    eventData: Record<string, unknown>,
+  ): Promise<TriggerFire | null> {
     const trigger = this.triggers.get(triggerId);
     if (!trigger || !trigger.enabled) {
       return null;
@@ -324,7 +353,10 @@ export class TriggerEngine {
     }
 
     await this.appendFire(fire);
-    this.config.emitEvent?.("trigger.finished", { fireId, status: fire.status });
+    this.config.emitEvent?.("trigger.finished", {
+      fireId,
+      status: fire.status,
+    });
     return fire;
   }
 }

@@ -13,8 +13,8 @@
  * System prompt body...
  */
 
-import type { HandDefinition } from "./types.js";
 import { readFileSync } from "node:fs";
+import type { HandDefinition } from "./types.js";
 
 /**
  * Simple YAML frontmatter parser (minimal implementation)
@@ -70,7 +70,7 @@ function parseSimpleYAML(text: string): Record<string, unknown> {
         value = false;
       } else if (value === "") {
         value = "";
-      } else if (!isNaN(Number(value))) {
+      } else if (!Number.isNaN(Number(value))) {
         value = Number(value);
       } else if (value.startsWith('"') && value.endsWith('"')) {
         value = value.slice(1, -1);
@@ -89,7 +89,7 @@ function parseSimpleYAML(text: string): Record<string, unknown> {
  * Parse a HAND.md file and return a HandDefinition
  */
 export function parseHandMD(
-  filePath: string,
+  _filePath: string,
   content: string,
 ): HandDefinition | { error: string } {
   // Split frontmatter and body
@@ -158,7 +158,7 @@ export function parseHandMD(
   }
 
   // Parse agent config
-  let agent = {
+  const agent = {
     model: "default",
     temperature: 0.2,
     max_iterations: undefined as number | undefined,
@@ -214,15 +214,25 @@ export function parseHandMD(
         key: String(setting.key ?? ""),
         label: String(setting.label ?? ""),
         description:
-          typeof setting.description === "string" ? setting.description : undefined,
-        type: (setting.type as "text" | "number" | "select" | "boolean") ??
-          "text",
-        default: (setting.default as string | number | boolean | undefined),
+          typeof setting.description === "string"
+            ? setting.description
+            : undefined,
+        type:
+          (setting.type as "text" | "number" | "select" | "boolean") ?? "text",
+        default: setting.default as string | number | boolean | undefined,
       };
       if (Array.isArray(setting.options)) {
         s.options = setting.options.map((opt) => ({
-          value: String(typeof opt === "object" && opt !== null && "value" in opt ? opt.value : opt),
-          label: String(typeof opt === "object" && opt !== null && "label" in opt ? opt.label : opt),
+          value: String(
+            typeof opt === "object" && opt !== null && "value" in opt
+              ? opt.value
+              : opt,
+          ),
+          label: String(
+            typeof opt === "object" && opt !== null && "label" in opt
+              ? opt.label
+              : opt,
+          ),
         }));
       }
       return s;
@@ -231,7 +241,9 @@ export function parseHandMD(
     dashboard: dashboard.map((metric) => ({
       label: String(metric.label ?? ""),
       memory_key: String(metric.memory_key ?? ""),
-      format: (metric.format as "number" | "text" | "datetime" | "duration") ?? "text",
+      format:
+        (metric.format as "number" | "text" | "datetime" | "duration") ??
+        "text",
     })),
     systemPrompt: body,
   };

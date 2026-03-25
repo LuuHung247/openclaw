@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import { lookupContextTokens } from "../agents/context.js";
-import { estimateCostUsd } from "../agents/usage.js";
 import {
   DEFAULT_CONTEXT_TOKENS,
   DEFAULT_MODEL,
@@ -14,6 +13,7 @@ import {
 } from "../agents/model-selection.js";
 import { runEmbeddedPiAgent } from "../agents/pi-embedded.js";
 import { buildWorkspaceSkillSnapshot } from "../agents/skills.js";
+import { estimateCostUsd } from "../agents/usage.js";
 import {
   DEFAULT_AGENT_WORKSPACE_DIR,
   ensureAgentWorkspace,
@@ -265,11 +265,16 @@ export async function agentCommand(
     });
   let provider = defaultProvider;
   let model = defaultModel;
+  // Resolve stored model: model field (new) > legacy override > config default
+  const storedModel =
+    sessionEntry?.model?.trim() ||
+    (sessionEntry?.providerOverride && sessionEntry?.modelOverride
+      ? `${sessionEntry.providerOverride}/${sessionEntry.modelOverride}`
+      : sessionEntry?.modelOverride?.trim());
+
   const hasAllowlist = (agentCfg?.allowedModels?.length ?? 0) > 0;
-  const hasStoredOverride = Boolean(
-    sessionEntry?.modelOverride || sessionEntry?.providerOverride,
-  );
-  const needsModelCatalog = hasAllowlist || hasStoredOverride;
+  const hasStoredModel = Boolean(storedModel);
+  const needsModelCatalog = hasAllowlist || hasStoredModel;
   let allowedModelKeys = new Set<string>();
 
   if (needsModelCatalog) {
@@ -282,30 +287,57 @@ export async function agentCommand(
     allowedModelKeys = allowed.allowedKeys;
   }
 
-  if (sessionEntry && sessionStore && sessionKey && hasStoredOverride) {
-    const overrideProvider =
-      sessionEntry.providerOverride?.trim() || defaultProvider;
-    const overrideModel = sessionEntry.modelOverride?.trim();
-    if (overrideModel) {
-      const key = modelKey(overrideProvider, overrideModel);
-      if (allowedModelKeys.size > 0 && !allowedModelKeys.has(key)) {
-        delete sessionEntry.providerOverride;
+  if (storedModel) {
+    const parts = storedModel.split("/");
+    if (parts.length >= 2) {
+      // Format: "provider/model"
+      const candidateProvider = parts[0];
+      const candidateModel = parts.slice(1).join("/");
+      const key = modelKey(candidateProvider, candidateModel);
+      if (allowedModelKeys.size === 0 || allowedModelKeys.has(key)) {
+        provider = candidateProvider;
+        model = candidateModel;
+      } else if (sessionEntry && sessionStore && sessionKey) {
+        // Invalid against allowlist — clear stored model
+        delete sessionEntry.model;
         delete sessionEntry.modelOverride;
+        delete sessionEntry.providerOverride;
         sessionEntry.updatedAt = Date.now();
         sessionStore[sessionKey] = sessionEntry;
         await saveSessionStore(storePath, sessionStore);
       }
-    }
-  }
-
-  const storedProviderOverride = sessionEntry?.providerOverride?.trim();
-  const storedModelOverride = sessionEntry?.modelOverride?.trim();
-  if (storedModelOverride) {
-    const candidateProvider = storedProviderOverride || defaultProvider;
-    const key = modelKey(candidateProvider, storedModelOverride);
-    if (allowedModelKeys.size === 0 || allowedModelKeys.has(key)) {
-      provider = candidateProvider;
-      model = storedModelOverride;
+    } else {
+      // Bare model ID — lookup provider from config
+      const providers = cfg.models?.providers ?? {};
+      let resolvedProvider = defaultProvider;
+      for (const [provId, provCfg] of Object.entries(providers)) {
+        const models = (provCfg as { models?: { id: string }[] }).models;
+        if (models?.some((m: { id: string }) => m.id === storedModel)) {
+          resolvedProvider = provId;
+          break;
+        }
+      }
+      const key = modelKey(resolvedProvider, storedModel);
+      if (allowedModelKeys.size === 0 || allowedModelKeys.has(key)) {
+        provider = resolvedProvider;
+        model = storedModel;
+        // Normalize: save with provider prefix
+        if (sessionEntry && sessionStore && sessionKey) {
+          sessionEntry.model = `${resolvedProvider}/${storedModel}`;
+          delete sessionEntry.modelOverride;
+          delete sessionEntry.providerOverride;
+          sessionEntry.updatedAt = Date.now();
+          sessionStore[sessionKey] = sessionEntry;
+          await saveSessionStore(storePath, sessionStore);
+        }
+      } else if (sessionEntry && sessionStore && sessionKey) {
+        delete sessionEntry.model;
+        delete sessionEntry.modelOverride;
+        delete sessionEntry.providerOverride;
+        sessionEntry.updatedAt = Date.now();
+        sessionStore[sessionKey] = sessionEntry;
+        await saveSessionStore(storePath, sessionStore);
+      }
     }
   }
   const sessionFile = resolveSessionTranscriptPath(sessionId);
@@ -433,9 +465,7 @@ export async function agentCommand(
 
   const logDeliveryError = (err: unknown) => {
     const deliveryTarget =
-      deliveryProvider === "telegram"
-        ? telegramTarget
-        : undefined;
+      deliveryProvider === "telegram" ? telegramTarget : undefined;
     const message = `Delivery failed (${deliveryProvider}${deliveryTarget ? ` to ${deliveryTarget}` : ""}): ${String(err)}`;
     runtime.error?.(message);
     if (!runtime.error) runtime.log(message);
@@ -454,10 +484,7 @@ export async function agentCommand(
       if (!bestEffortDeliver) throw err;
       logDeliveryError(err);
     }
-    if (
-      deliveryProvider !== "telegram" &&
-      deliveryProvider !== "webchat"
-    ) {
+    if (deliveryProvider !== "telegram" && deliveryProvider !== "webchat") {
       const err = new Error(`Unknown provider: ${deliveryProvider}`);
       if (!bestEffortDeliver) throw err;
       logDeliveryError(err);

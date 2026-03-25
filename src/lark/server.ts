@@ -7,8 +7,11 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer, type Server } from "node:http";
-import type { LarkMessageEvent, LarkMessageHandler, LarkTextContent, LarkWebhookEvent } from "./types.js";
-
+import type {
+  LarkMessageEvent,
+  LarkMessageHandler,
+  LarkTextContent,
+} from "./types.js";
 
 /** Lark webhook server options */
 export interface LarkServerOptions {
@@ -96,7 +99,9 @@ export class LarkWebhookServer {
         res.writeHead(200).end(JSON.stringify({ code: 0, msg: "success" }));
       } catch (err) {
         console.error("[lark] message handler error:", err);
-        res.writeHead(500).end(JSON.stringify({ code: 500, msg: "Internal error" }));
+        res
+          .writeHead(500)
+          .end(JSON.stringify({ code: 500, msg: "Internal error" }));
       }
       return;
     }
@@ -108,7 +113,9 @@ export class LarkWebhookServer {
         res.writeHead(200).end(JSON.stringify({ code: 0, msg: "success" }));
       } catch (err) {
         console.error("[lark] legacy message handler error:", err);
-        res.writeHead(500).end(JSON.stringify({ code: 500, msg: "Internal error" }));
+        res
+          .writeHead(500)
+          .end(JSON.stringify({ code: 500, msg: "Internal error" }));
       }
       return;
     }
@@ -119,7 +126,9 @@ export class LarkWebhookServer {
   }
 
   /** Check if event is URL verification challenge */
-  private isChallenge(data: unknown): data is { challenge: string; token?: string } {
+  private isChallenge(
+    data: unknown,
+  ): data is { challenge: string; token?: string } {
     return (
       typeof data === "object" &&
       data !== null &&
@@ -134,7 +143,10 @@ export class LarkWebhookServer {
     res: ServerResponse,
   ): void {
     // Verify token if configured
-    if (this.options.verificationToken && data.token !== this.options.verificationToken) {
+    if (
+      this.options.verificationToken &&
+      data.token !== this.options.verificationToken
+    ) {
       console.warn("[lark] invalid verification token");
       res.writeHead(403).end("Invalid token");
       return;
@@ -166,7 +178,10 @@ export class LarkWebhookServer {
     if (typeof d !== "object" || d === null) return false;
     if (typeof d.event !== "object" || d.event === null) return false;
     const evt = d.event as Record<string, unknown>;
-    return (d.type === "event_callback" || d.type === "message") && evt.type === "message";
+    return (
+      (d.type === "event_callback" || d.type === "message") &&
+      evt.type === "message"
+    );
   }
 
   /** Handle message event (v2) */
@@ -201,7 +216,10 @@ export class LarkWebhookServer {
   }
 
   /** Parse message content based on type */
-  private parseMessageContent(contentJson: string, msgType: string): LarkTextContent {
+  private parseMessageContent(
+    contentJson: string,
+    msgType: string,
+  ): LarkTextContent {
     if (msgType !== "text") {
       return { text: `[Unsupported message type: ${msgType}]` };
     }

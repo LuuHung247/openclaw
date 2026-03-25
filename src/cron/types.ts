@@ -14,9 +14,7 @@ export type CronPayload =
       thinking?: string;
       timeoutSeconds?: number;
       deliver?: boolean;
-      channel?:
-        | "last"
-        | "telegram";
+      channel?: "last" | "telegram";
       to?: string;
       bestEffortDeliver?: boolean;
       sessionKey?: string; // Target specific session (webui, telegram, lark, etc.)

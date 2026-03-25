@@ -7,8 +7,8 @@
 
 import type { ClawdisConfig } from "../config/config.js";
 import { LarkClient } from "./client.js";
-import type { LarkConfig, LarkMessageHandler } from "./types.js";
 import { LarkWebhookServer } from "./server.js";
+import type { LarkConfig, LarkMessageHandler } from "./types.js";
 
 /** Lark provider */
 export class LarkProvider {
@@ -47,7 +47,11 @@ export class LarkProvider {
   }
 
   /** Send message to Lark */
-  async sendMessage(receiveId: string, text: string, replyTo?: string): Promise<string> {
+  async sendMessage(
+    receiveId: string,
+    text: string,
+    replyTo?: string,
+  ): Promise<string> {
     if (!this.client) {
       throw new Error("Lark client not initialized");
     }
@@ -73,7 +77,10 @@ export class LarkProvider {
 let activeProvider: LarkProvider | null = null;
 
 /** Get or create Lark provider from config */
-export function getLarkProvider(config: LarkConfig, handler: LarkMessageHandler): LarkProvider {
+export function getLarkProvider(
+  config: LarkConfig,
+  handler: LarkMessageHandler,
+): LarkProvider {
   if (!activeProvider) {
     activeProvider = new LarkProvider(config, handler);
   }

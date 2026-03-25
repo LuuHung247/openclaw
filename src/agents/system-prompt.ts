@@ -129,5 +129,15 @@ export function buildAgentSystemPromptAppend(params: {
     thinkHint,
   );
 
+  // Model identity reminder — ensures agent answers correctly even after mid-session model switch.
+  // The conversation history may contain an older system prompt with a different model name;
+  // this instruction takes precedence over that historical context.
+  if (runtimeInfo?.model) {
+    lines.push(
+      "",
+      `**IMPORTANT**: You are currently running on model \`${runtimeInfo.model}\`. If the user asks what model you are using, ALWAYS answer with this exact model identifier, regardless of what appears in earlier conversation history. The model may have been switched mid-session.`,
+    );
+  }
+
   return lines.filter(Boolean).join("\n");
 }

@@ -1725,9 +1725,19 @@ var OpenFangAPI = (function() {
       var modelName = body.model || '';
       // sessions.patch now supports modelOverride — sets per-session model
       // Format accepted: "provider/model" or just "model"
-      return request('sessions.patch', { key: agentId, modelOverride: modelName || null })
-        .then(function() { return { ok: true, model: modelName }; })
-        .catch(function() { return { ok: true, model: modelName }; });
+      function doSwitch() {
+        return request('sessions.patch', { key: agentId, modelOverride: modelName || null })
+          .then(function(r) { _statusCache = null; _statusCacheAt = 0; return { ok: true, model: modelName, entry: r && r.entry }; });
+      }
+      return doSwitch().catch(function(err) {
+        // WS may not be connected yet (e.g. navigated back from Settings) — retry once after 1s
+        if (err && err.message && err.message.indexOf('not connected') !== -1) {
+          return new Promise(function(resolve, reject) {
+            setTimeout(function() { doSwitch().then(resolve).catch(reject); }, 1000);
+          });
+        }
+        return Promise.reject(err);
+      });
     }
     // PUT /api/agents/{id}/mode — set agent mode (not in openclaw)
     if (path.startsWith('/api/agents/') && path.endsWith('/mode')) {
@@ -2047,6 +2057,7 @@ var OpenFangAPI = (function() {
 
     // Named methods (some pages call these directly)
     getStatus: getStatus,
+    invalidateStatusCache: function() { _statusCache = null; _statusCacheAt = 0; },
     getHealth: getHealth,
     getVersion: getVersion,
     getAgents: getAgents,

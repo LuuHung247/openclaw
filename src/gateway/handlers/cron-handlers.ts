@@ -6,7 +6,6 @@
  */
 
 import {
-  appendCronRunLog,
   readCronRunLogEntries,
   resolveCronRunLogPath,
 } from "../../cron/run-log.js";
@@ -172,7 +171,10 @@ export async function handleCronRuns(
     return;
   }
   const p = params as { id: string; limit?: number };
-  const logPath = resolveCronRunLogPath({ storePath: cronStorePath, jobId: p.id });
+  const logPath = resolveCronRunLogPath({
+    storePath: cronStorePath,
+    jobId: p.id,
+  });
   const entries = await readCronRunLogEntries(logPath, {
     limit: p.limit,
     jobId: p.id,

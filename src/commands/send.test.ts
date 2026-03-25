@@ -56,7 +56,9 @@ describe("sendCommand", () => {
 
   it("sends via telegram by default", async () => {
     const deps = makeDeps({
-      sendMessageTelegram: vi.fn().mockResolvedValue({ messageId: "t1", chatId: "+1" }),
+      sendMessageTelegram: vi
+        .fn()
+        .mockResolvedValue({ messageId: "t1", chatId: "+1" }),
     });
     testConfig = { telegram: { botToken: "token-abc" } };
     await sendCommand(
@@ -112,7 +114,9 @@ describe("sendCommand", () => {
 
   it("emits json output", async () => {
     const deps = makeDeps({
-      sendMessageTelegram: vi.fn().mockResolvedValue({ messageId: "direct2", chatId: "+1" }),
+      sendMessageTelegram: vi
+        .fn()
+        .mockResolvedValue({ messageId: "direct2", chatId: "+1" }),
     });
     testConfig = { telegram: { botToken: "token-abc" } };
     await sendCommand(

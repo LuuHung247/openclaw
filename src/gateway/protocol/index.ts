@@ -40,6 +40,8 @@ import {
   errorShape,
   type GatewayFrame,
   GatewayFrameSchema,
+  type HandsSessionsOptionsParams,
+  HandsSessionsOptionsParamsSchema,
   type HelloOk,
   HelloOkSchema,
   type ModelsListParams,
@@ -105,8 +107,6 @@ import {
   WebLoginStartParamsSchema,
   type WebLoginWaitParams,
   WebLoginWaitParamsSchema,
-  type HandsSessionsOptionsParams,
-  HandsSessionsOptionsParamsSchema,
 } from "./schema.js";
 
 const ajv = new (

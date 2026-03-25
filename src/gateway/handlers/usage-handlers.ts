@@ -2,8 +2,8 @@
  * Usage analytics handler implementations — extracted from server.ts WS switch.
  */
 
-import { readUsageLog } from "../usage-log.js";
 import type { errorShape } from "../protocol/index.js";
+import { readUsageLog } from "../usage-log.js";
 
 type RespondFn = (
   ok: boolean,
@@ -107,7 +107,10 @@ export function handleUsageByAgent(respond: RespondFn): void {
 
 export function handleUsageDaily(respond: RespondFn): void {
   const log = readUsageLog();
-  const byDay: Record<string, { cost_usd: number; tokens: number; calls: number }> = {};
+  const byDay: Record<
+    string,
+    { cost_usd: number; tokens: number; calls: number }
+  > = {};
   for (const e of log) {
     if (!byDay[e.date]) byDay[e.date] = { cost_usd: 0, tokens: 0, calls: 0 };
     byDay[e.date].cost_usd += e.cost_usd;

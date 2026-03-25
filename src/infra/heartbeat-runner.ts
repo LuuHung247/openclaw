@@ -26,10 +26,7 @@ import {
   setHeartbeatWakeHandler,
 } from "./heartbeat-wake.js";
 
-export type HeartbeatTarget =
-  | "last"
-  | "telegram"
-  | "none";
+export type HeartbeatTarget = "last" | "telegram" | "none";
 
 export type HeartbeatDeliveryTarget = {
   channel: "telegram" | "none";
@@ -142,9 +139,7 @@ export function resolveHeartbeatDeliveryTarget(params: {
   const { cfg, entry } = params;
   const rawTarget = cfg.agent?.heartbeat?.target;
   const target: HeartbeatTarget =
-    rawTarget === "telegram" ||
-    rawTarget === "none" ||
-    rawTarget === "last"
+    rawTarget === "telegram" || rawTarget === "none" || rawTarget === "last"
       ? rawTarget
       : "last";
   if (target === "none") {
@@ -162,9 +157,7 @@ export function resolveHeartbeatDeliveryTarget(params: {
       ? entry.lastChannel
       : undefined;
   const lastChannel =
-    lastChannelRaw === "telegram"
-      ? lastChannelRaw
-      : undefined;
+    lastChannelRaw === "telegram" ? lastChannelRaw : undefined;
   const lastTo = typeof entry?.lastTo === "string" ? entry.lastTo.trim() : "";
 
   const channel: "telegram" | undefined =

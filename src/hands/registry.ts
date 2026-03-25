@@ -9,23 +9,14 @@
  */
 
 import crypto from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import JSON5 from "json5";
-import type {
-  HandDefinition,
-  HandInstance,
-  HandStatus,
-} from "./types.js";
 import { loadHandsFromDirectory } from "./parser.js";
+import type { HandDefinition, HandInstance, HandStatus } from "./types.js";
 
 const HANDS_DIR = join(process.env.HOME ?? "", ".clawdis", "hands");
-const BUNDLED_DIR = join(
-  import.meta.dirname ?? "",
-  "..",
-  "hands",
-  "bundled",
-);
+const BUNDLED_DIR = join(import.meta.dirname ?? "", "..", "hands", "bundled");
 const INSTANCES_FILE = join(HANDS_DIR, "instances.json5");
 
 export interface HandsRegistryConfig {
@@ -175,7 +166,9 @@ export class HandsRegistry {
    */
   updateInstance(
     instanceId: string,
-    updates: Partial<Omit<HandInstance, "instanceId" | "handId" | "activatedAt">>,
+    updates: Partial<
+      Omit<HandInstance, "instanceId" | "handId" | "activatedAt">
+    >,
   ): HandInstance | undefined {
     const instance = this.instances.get(instanceId);
     if (!instance) return undefined;

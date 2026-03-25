@@ -7,9 +7,9 @@
  */
 
 import type { WebSocket } from "ws";
-import type { ConnectParams } from "./protocol/index.js";
 import type { HealthSummary } from "../commands/health.js";
 import type { CronService } from "../cron/service.js";
+import type { ConnectParams } from "./protocol/index.js";
 
 // ─── Client type ─────────────────────────────────────────────────────────────
 

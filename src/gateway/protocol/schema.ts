@@ -768,7 +768,9 @@ export type ChatAbortParams = Static<typeof ChatAbortParamsSchema>;
 export type ChatEvent = Static<typeof ChatEventSchema>;
 export type TickEvent = Static<typeof TickEventSchema>;
 export type ShutdownEvent = Static<typeof ShutdownEventSchema>;
-export type HandsSessionsOptionsParams = Static<typeof HandsSessionsOptionsParamsSchema>;
+export type HandsSessionsOptionsParams = Static<
+  typeof HandsSessionsOptionsParamsSchema
+>;
 
 export const ErrorCodes = {
   NOT_LINKED: "NOT_LINKED",

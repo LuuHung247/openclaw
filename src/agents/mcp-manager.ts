@@ -145,9 +145,13 @@ export function resetMcpManager(): void {
 
 // ─── Agent tool builder ───────────────────────────────────────────────────────
 
-function buildAgentTool(def: McpToolDefinition, client: McpClient): AnyAgentTool {
+function buildAgentTool(
+  def: McpToolDefinition,
+  client: McpClient,
+): AnyAgentTool {
   // Build a TypeBox schema from the MCP inputSchema properties
-  const properties = (def.inputSchema?.properties as Record<string, unknown>) ?? {};
+  const properties =
+    (def.inputSchema?.properties as Record<string, unknown>) ?? {};
   const required = Array.isArray(def.inputSchema?.required)
     ? (def.inputSchema.required as string[])
     : [];
@@ -174,7 +178,9 @@ function buildAgentTool(def: McpToolDefinition, client: McpClient): AnyAgentTool
   // Make non-required fields optional at the TypeBox level
   const finalProps: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(schemaProps)) {
-    finalProps[k] = required.includes(k) ? v : Type.Optional(v as Parameters<typeof Type.Optional>[0]);
+    finalProps[k] = required.includes(k)
+      ? v
+      : Type.Optional(v as Parameters<typeof Type.Optional>[0]);
   }
 
   const inputSchema =

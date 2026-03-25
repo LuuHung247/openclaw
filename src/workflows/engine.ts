@@ -13,17 +13,35 @@
  */
 
 import crypto from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import JSON5 from "json5";
 
 export type WorkflowStep =
-  | { kind: "agent"; name: string; prompt: string; model?: string; timeoutMs?: number }
+  | {
+      kind: "agent";
+      name: string;
+      prompt: string;
+      model?: string;
+      timeoutMs?: number;
+    }
   | { kind: "bash"; name: string; command: string; timeoutMs?: number }
   | { kind: "sleep"; name: string; durationMs: number }
-  | { kind: "conditional"; name: string; condition: string; then: WorkflowStep[]; else?: WorkflowStep[] }
+  | {
+      kind: "conditional";
+      name: string;
+      condition: string;
+      then: WorkflowStep[];
+      else?: WorkflowStep[];
+    }
   | { kind: "parallel"; name: string; steps: WorkflowStep[] }
-  | { kind: "loop"; name: string; steps: WorkflowStep[]; maxIterations: number; until?: string };
+  | {
+      kind: "loop";
+      name: string;
+      steps: WorkflowStep[];
+      maxIterations: number;
+      until?: string;
+    };
 
 export type WorkflowDefinition = {
   id: string;
@@ -92,8 +110,12 @@ export class WorkflowEngine {
       workflowsDir: config?.workflowsDir ?? WORKFLOWS_DIR,
       workflowsFile: config?.workflowsFile ?? WORKFLOWS_FILE,
       runsFile: config?.runsFile ?? RUNS_FILE,
-      runAgentStep: config?.runAgentStep ?? (async () => ({ output: "", error: "Not implemented" })),
-      runBashStep: config?.runBashStep ?? (async () => ({ output: "", error: "Not implemented" })),
+      runAgentStep:
+        config?.runAgentStep ??
+        (async () => ({ output: "", error: "Not implemented" })),
+      runBashStep:
+        config?.runBashStep ??
+        (async () => ({ output: "", error: "Not implemented" })),
       emitEvent: config?.emitEvent ?? (() => {}),
     };
   }
@@ -174,7 +196,7 @@ export class WorkflowEngine {
         mkdirSync(dir, { recursive: true });
       }
 
-      const line = JSON.stringify(run) + "\n";
+      const line = `${JSON.stringify(run)}\n`;
       const { appendFileSync } = require("node:fs");
       appendFileSync(runsFile, line);
     } catch (err) {
@@ -190,7 +212,9 @@ export class WorkflowEngine {
     return Array.from(this.workflows.values());
   }
 
-  async createWorkflow(def: Omit<WorkflowDefinition, "id" | "createdAtMs" | "updatedAtMs">): Promise<WorkflowDefinition> {
+  async createWorkflow(
+    def: Omit<WorkflowDefinition, "id" | "createdAtMs" | "updatedAtMs">,
+  ): Promise<WorkflowDefinition> {
     const id = crypto.randomUUID();
     const now = Date.now();
     const workflow: WorkflowDefinition = {
@@ -204,7 +228,10 @@ export class WorkflowEngine {
     return workflow;
   }
 
-  async updateWorkflow(id: string, updates: Partial<Omit<WorkflowDefinition, "id" | "createdAtMs">>): Promise<WorkflowDefinition | undefined> {
+  async updateWorkflow(
+    id: string,
+    updates: Partial<Omit<WorkflowDefinition, "id" | "createdAtMs">>,
+  ): Promise<WorkflowDefinition | undefined> {
     const workflow = this.workflows.get(id);
     if (!workflow) return undefined;
 
@@ -232,14 +259,19 @@ export class WorkflowEngine {
   }
 
   listRuns(workflowId?: string): WorkflowRun[] {
-    const all = Array.from(this.runs.values()).sort((a, b) => b.startedAt - a.startedAt);
+    const all = Array.from(this.runs.values()).sort(
+      (a, b) => b.startedAt - a.startedAt,
+    );
     if (workflowId) {
       return all.filter((r) => r.workflowId === workflowId);
     }
     return all;
   }
 
-  async execute(workflowId: string, input: Record<string, string> = {}): Promise<WorkflowRun> {
+  async execute(
+    workflowId: string,
+    input: Record<string, string> = {},
+  ): Promise<WorkflowRun> {
     const workflow = this.workflows.get(workflowId);
     if (!workflow) {
       throw new Error(`Workflow not found: ${workflowId}`);
@@ -275,7 +307,10 @@ export class WorkflowEngine {
             run.error = result.error || "Step failed";
             break;
           }
-          if (workflow.onError === "retry" && result.attempts < workflow.maxRetries) {
+          if (
+            workflow.onError === "retry" &&
+            result.attempts < workflow.maxRetries
+          ) {
             // Retry step
             continue;
           }
@@ -332,7 +367,11 @@ export class WorkflowEngine {
       attempts: 0,
     };
 
-    const finish = (status: StepResult["status"], output?: string, error?: string) => {
+    const finish = (
+      status: StepResult["status"],
+      output?: string,
+      error?: string,
+    ) => {
       result.status = status;
       result.output = output;
       result.error = error;
@@ -374,33 +413,62 @@ export class WorkflowEngine {
         }
 
         case "conditional": {
-          const conditionMet = this.evaluateCondition(step.condition, run.variables);
+          const conditionMet = this.evaluateCondition(
+            step.condition,
+            run.variables,
+          );
           const branch = conditionMet ? step.then : step.else;
           if (!branch || branch.length === 0) {
-            return finish("completed", `Condition ${step.condition} was ${conditionMet}`);
+            return finish(
+              "completed",
+              `Condition ${step.condition} was ${conditionMet}`,
+            );
           }
 
           for (const branchStep of branch) {
-            const branchResult = await this.executeStep(branchStep, run, workflow);
+            const branchResult = await this.executeStep(
+              branchStep,
+              run,
+              workflow,
+            );
             run.stepResults.push(branchResult);
-            if (branchResult.status === "failed" && workflow.onError === "fail") {
-              return finish("failed", undefined, `Branch step failed: ${branchResult.error}`);
+            if (
+              branchResult.status === "failed" &&
+              workflow.onError === "fail"
+            ) {
+              return finish(
+                "failed",
+                undefined,
+                `Branch step failed: ${branchResult.error}`,
+              );
             }
           }
-          return finish("completed", `Condition ${step.condition} was ${conditionMet}`);
+          return finish(
+            "completed",
+            `Condition ${step.condition} was ${conditionMet}`,
+          );
         }
 
         case "parallel": {
-          const promises = step.steps.map((s) => this.executeStep(s, run, workflow));
+          const promises = step.steps.map((s) =>
+            this.executeStep(s, run, workflow),
+          );
           const results = await Promise.all(promises);
           for (const r of results) {
             run.stepResults.push(r);
           }
           const failed = results.filter((r) => r.status === "failed");
           if (failed.length > 0 && workflow.onError === "fail") {
-            return finish("failed", undefined, `${failed.length} parallel steps failed`);
+            return finish(
+              "failed",
+              undefined,
+              `${failed.length} parallel steps failed`,
+            );
           }
-          return finish("completed", `${results.length} parallel steps completed`);
+          return finish(
+            "completed",
+            `${results.length} parallel steps completed`,
+          );
         }
 
         case "loop": {
@@ -408,29 +476,53 @@ export class WorkflowEngine {
           while (iterations < step.maxIterations) {
             iterations++;
             for (const loopStep of step.steps) {
-              const loopResult = await this.executeStep(loopStep, run, workflow);
+              const loopResult = await this.executeStep(
+                loopStep,
+                run,
+                workflow,
+              );
               run.stepResults.push(loopResult);
-              if (loopResult.status === "failed" && workflow.onError === "fail") {
-                return finish("failed", undefined, `Loop step failed: ${loopResult.error}`);
+              if (
+                loopResult.status === "failed" &&
+                workflow.onError === "fail"
+              ) {
+                return finish(
+                  "failed",
+                  undefined,
+                  `Loop step failed: ${loopResult.error}`,
+                );
               }
             }
 
-            if (step.until && this.evaluateCondition(step.until, run.variables)) {
+            if (
+              step.until &&
+              this.evaluateCondition(step.until, run.variables)
+            ) {
               break;
             }
           }
-          return finish("completed", `Loop completed after ${iterations} iterations`);
+          return finish(
+            "completed",
+            `Loop completed after ${iterations} iterations`,
+          );
         }
 
         default:
-          return finish("failed", undefined, `Unknown step kind: ${(step as { kind: string }).kind}`);
+          return finish(
+            "failed",
+            undefined,
+            `Unknown step kind: ${(step as { kind: string }).kind}`,
+          );
       }
     } catch (err) {
       return finish("failed", undefined, String(err));
     }
   }
 
-  private substituteVariables(template: string, variables: Record<string, string>): string {
+  private substituteVariables(
+    template: string,
+    variables: Record<string, string>,
+  ): string {
     let result = template;
     for (const [key, value] of Object.entries(variables)) {
       const regex = new RegExp(`\\{\\{${key}\\}\\}`, "g");
@@ -439,7 +531,10 @@ export class WorkflowEngine {
     return result;
   }
 
-  private evaluateCondition(condition: string, variables: Record<string, string>): boolean {
+  private evaluateCondition(
+    condition: string,
+    variables: Record<string, string>,
+  ): boolean {
     // Simple condition evaluation
     // Supports: {{var}} == "value", {{var}} != "value", {{var}} contains "text"
     const regex = /\{\{(\w+)\}\}\s*(==|!=|contains)\s*"([^"]*)"/;

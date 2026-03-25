@@ -14,7 +14,6 @@ import {
 } from "../config/config.js";
 import {
   emitAgentEvent,
-  registerAgentRunContext,
   resetAgentRunContextForTest,
 } from "../infra/agent-events.js";
 import { GatewayLockError } from "../infra/gateway-lock.js";
@@ -2041,7 +2040,6 @@ describe("gateway server", () => {
     await server.close();
   });
 
-
   test("rejects protocol mismatch", async () => {
     const { server, ws } = await startServerWithClient();
     try {
@@ -3635,7 +3633,6 @@ describe("gateway server", () => {
     ws.close();
     await server.close();
   });
-
 
   test("bridge chat.abort cancels while saving the session store", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdis-gw-"));

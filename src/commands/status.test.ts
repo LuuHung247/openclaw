@@ -36,7 +36,9 @@ const runtime = {
 describe("statusCommand", () => {
   it("prints JSON when requested", async () => {
     await statusCommand({ json: true }, runtime as never);
-    const payload = JSON.parse((runtime.log as ReturnType<typeof vi.fn>).mock.calls[0][0]);
+    const payload = JSON.parse(
+      (runtime.log as ReturnType<typeof vi.fn>).mock.calls[0][0],
+    );
     expect(payload.sessions.count).toBe(1);
     expect(payload.sessions.path).toBe("/tmp/sessions.json");
     expect(payload.sessions.defaults.model).toBeTruthy();
@@ -49,7 +51,9 @@ describe("statusCommand", () => {
   it("prints formatted lines otherwise", async () => {
     (runtime.log as ReturnType<typeof vi.fn>).mockClear();
     await statusCommand({}, runtime as never);
-    const logs = (runtime.log as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+    const logs = (runtime.log as ReturnType<typeof vi.fn>).mock.calls.map((c) =>
+      String(c[0]),
+    );
     expect(logs.some((l) => l.includes("Session store"))).toBe(true);
     expect(logs.some((l) => l.includes("Active sessions"))).toBe(true);
     expect(logs.some((l) => l.includes("Default model"))).toBe(true);

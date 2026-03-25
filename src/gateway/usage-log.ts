@@ -11,8 +11,8 @@ import { CONFIG_DIR } from "../utils.js";
 export const USAGE_LOG_PATH = path.join(CONFIG_DIR, "usage-log.jsonl");
 
 export type UsageLogEntry = {
-  ts: string;        // ISO date string
-  date: string;      // YYYY-MM-DD
+  ts: string; // ISO date string
+  date: string; // YYYY-MM-DD
   sessionKey: string;
   model: string;
   input_tokens: number;
@@ -24,7 +24,7 @@ export type UsageLogEntry = {
 
 export function appendUsageEvent(entry: UsageLogEntry): void {
   try {
-    fs.appendFileSync(USAGE_LOG_PATH, JSON.stringify(entry) + "\n", "utf-8");
+    fs.appendFileSync(USAGE_LOG_PATH, `${JSON.stringify(entry)}\n`, "utf-8");
   } catch {
     // non-fatal — analytics log failure should not break normal operation
   }

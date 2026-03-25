@@ -9,12 +9,12 @@ import {
   SessionManager,
   SettingsManager,
 } from "@mariozechner/pi-coding-agent";
-import { getMemorySubstrate } from "../memory/sqlite.js";
 import type { ThinkLevel, VerboseLevel } from "../auto-reply/thinking.js";
 import { formatToolAggregate } from "../auto-reply/tool-meta.js";
 import type { ClawdisConfig } from "../config/config.js";
 import { getMachineDisplayName } from "../infra/machine-name.js";
 import { splitMediaFromOutput } from "../media/parse.js";
+import { getMemorySubstrate } from "../memory/sqlite.js";
 import {
   type enqueueCommand,
   enqueueCommandInLane,
@@ -31,7 +31,11 @@ import {
 } from "./pi-embedded-helpers.js";
 import { subscribeEmbeddedPiSession } from "./pi-embedded-subscribe.js";
 import { extractAssistantText } from "./pi-embedded-utils.js";
-import { getApiKeyForModel, resolveModel, resolvePromptSkills } from "./pi-model-resolver.js";
+import {
+  getApiKeyForModel,
+  resolveModel,
+  resolvePromptSkills,
+} from "./pi-model-resolver.js";
 import { createClawdisCodingTools } from "./pi-tools.js";
 import {
   applySkillEnvOverrides,
@@ -236,7 +240,7 @@ export async function runEmbeddedPiAgent(params: {
         // Inject contextual SQLite memory (hybrid BM25 + vector when prompt available)
         try {
           const geminiKey = (
-            params.config?.models?.providers?.["gemini"] as
+            params.config?.models?.providers?.gemini as
               | { apiKey?: string }
               | undefined
           )?.apiKey?.trim();
@@ -343,38 +347,90 @@ export async function runEmbeddedPiAgent(params: {
         // anywhere in history — failed/aborted runs persist these and corrupt turn ordering
         // for providers that validate message structure (Gemini, Claude, etc).
         prior = prior.filter((msg) => {
-          const m = msg as { role?: string; stopReason?: string; content?: unknown[] };
-          if (m.role === "assistant" && (!m.content?.length || m.stopReason === "error")) {
+          const m = msg as {
+            role?: string;
+            stopReason?: string;
+            content?: unknown[];
+          };
+          if (
+            m.role === "assistant" &&
+            (!m.content?.length || m.stopReason === "error")
+          ) {
             return false;
           }
           return true;
         });
-        // Sanitize: strip thoughtSignature from toolCall blocks in history.
+        // Sanitize: strip thoughtSignature from toolCall blocks AND remove empty
+        // text blocks from assistant messages that also contain tool calls.
         // Gemini thinking signatures are only valid within the same turn — replaying them
         // in a resumed session causes "function call turn comes immediately after user turn".
+        // Empty text blocks alongside tool calls also confuse Gemini's turn validation.
         // Fix mirrors openfang/gemini.rs: skip thinking blocks on history replay.
         prior = prior.map((msg) => {
           const m = msg as { role?: string; content?: unknown[] };
           if (m.role !== "assistant" || !m.content?.length) return msg;
-          const hasThoughtSig = m.content.some(
-            (b) => (b as { thoughtSignature?: unknown }).thoughtSignature,
+          let needsUpdate = false;
+          // Check for thoughtSignature
+          if (
+            m.content.some(
+              (b) => (b as { thoughtSignature?: unknown }).thoughtSignature,
+            )
+          ) {
+            needsUpdate = true;
+          }
+          // Check for empty text blocks alongside tool calls
+          const hasToolCall = m.content.some(
+            (b) => (b as { type?: string }).type === "toolCall",
           );
-          if (!hasThoughtSig) return msg;
+          const hasEmptyText = m.content.some((b) => {
+            const block = b as { type?: string; text?: string };
+            return block.type === "text" && (!block.text || !block.text.trim());
+          });
+          if (hasToolCall && hasEmptyText) needsUpdate = true;
+
+          if (!needsUpdate) return msg;
+
           const stripped = {
             ...m,
-            content: m.content.map((b) => {
-              const block = b as Record<string, unknown>;
-              if (!block.thoughtSignature) return b;
-              const { thoughtSignature: _sig, ...rest } = block;
-              return rest;
-            }),
+            content: m.content
+              .map((b) => {
+                const block = b as Record<string, unknown>;
+                if (!block.thoughtSignature) return b;
+                const { thoughtSignature: _sig, ...rest } = block;
+                return rest;
+              })
+              .filter((b) => {
+                // Remove empty text blocks from messages that have tool calls
+                if (!hasToolCall) return true;
+                const block = b as { type?: string; text?: string };
+                if (
+                  block.type === "text" &&
+                  (!block.text || !block.text.trim())
+                )
+                  return false;
+                return true;
+              }),
           };
-          // Cast back — we only removed an extra field, structure is still compatible
+          // Cast back — we only removed extra fields, structure is still compatible
           return stripped as typeof msg;
+        });
+        // Force cross-provider transform: remove provider/api from assistant history
+        // messages so pi-ai transformMessages() strips thinking blocks and signatures
+        // instead of passing them through unchanged (same-provider shortcut in
+        // transorm-messages.js:29-31). Prevents Gemini turn ordering error on replay.
+        prior = prior.map((msg) => {
+          const m = msg as { role?: string };
+          if (m.role !== "assistant") return msg;
+          const rec = msg as unknown as Record<string, unknown>;
+          const { provider: _p, api: _a, ...rest } = rec;
+          return rest as unknown as typeof msg;
         });
         // Sanitize: history must start with a user turn. Drop any leading non-user messages
         // (orphaned toolResult/assistant after pruning or broken serialization).
-        while (prior.length > 0 && (prior[0] as { role?: string }).role !== "user") {
+        while (
+          prior.length > 0 &&
+          (prior[0] as { role?: string }).role !== "user"
+        ) {
           prior = prior.slice(1);
         }
         // ----------------------------------
@@ -531,7 +587,7 @@ export async function runEmbeddedPiAgent(params: {
         // Persist memory for this run
         try {
           const geminiKey = (
-            params.config?.models?.providers?.["gemini"] as
+            params.config?.models?.providers?.gemini as
               | { apiKey?: string }
               | undefined
           )?.apiKey?.trim();
